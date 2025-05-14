@@ -1,9 +1,0 @@
-Initial Configuration:
-In the "listen 80" block, the "location /" block should be commented out and the acme-challenge block should not be commented.
-The "listen 443" block should be commented. 
-
-1. docker compose up -d
-2. docker compose run --rm  certbot certonly --force-renew --webroot --webroot-path /var/www/certbot/ --email hshafiq@hotmail.co.uk -d av-converter.com
-3. Uncomment the listen 443 server block.
-4. Remove or comment out the acme-challenge block in the listen 80 server server block and uncomment the location / block.
-5. docker compose restart nginx
