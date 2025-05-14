@@ -1,11 +1,8 @@
-networks:
-  loki:
-
 services:
   backend:
     container_name: backend
     build:
-      context: ../../
+      context: ../../ # Does not apply to the volumes
       dockerfile: docker/prod/Dockerfile.backend
 
   nginx:
@@ -28,36 +25,3 @@ services:
     volumes:
       - ../../certbot/www/:/var/www/certbot/:rw
       - ../../certbot/conf/:/etc/letsencrypt/:rw
-
-  loki:
-    container_name: Loki
-    image: grafana/loki
-    volumes:
-      - /root/AV-converter/docker/prod/loki:/etc/loki
-    ports:
-      - "3100:3100"
-    restart: unless-stopped
-    command: -config.file=/etc/loki/loki-config.yml
-    networks:
-      - loki
-
-  promtail:
-    container_name: Promtail
-    image: grafana/promtail
-    volumes:
-      - /var/log:/var/log
-      - /root/AV-converter/docker/prod/promtail:/etc/promtail
-    restart: unless-stopped
-    command: -config.file=/etc/promtail/promtail-config.yml
-    networks:
-      - loki
-
-  grafana:
-    container_name: Grafana
-    image: grafana/grafana:latest
-    user: "0"
-    ports:
-      - "3000:3000"
-    restart: unless-stopped
-    networks:
-      - loki
