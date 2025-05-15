@@ -1,2 +1,11 @@
-Stop all containers: docker stop $(docker ps -a -q)
-Delete all containers: docker rm -f $(docker ps -a -q)
+Stop all containers:
+docker stop $(docker ps -a -q)
+
+Delete all containers:
+docker rm -f $(docker ps -a -q)
+
+Watch container logs:
+docker logs -f --timestamps <container name>
+
+View files in container:
+docker exec -it <container name> sh

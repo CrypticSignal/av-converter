@@ -1,32 +1,17 @@
 services:
-  backend:
-    container_name: backend
-    build:
-      context: ../../
-      dockerfile: docker/dev/Dockerfile.backend
-    develop:
-      watch:
-        - action: sync
-          path: ../../backend/src
-          target: /backend/src
-          ignore:
-            - node_modules/
-        - action: rebuild
-          path: ../../backend/package.json
-
   frontend:
-    container_name: frontend
+    container_name: app
     build:
       context: ../../
-      dockerfile: docker/dev/Dockerfile.frontend
+      dockerfile: docker/dev/Dockerfile
     develop:
       watch:
         - action: sync
-          path: ../../frontend/src
-          target: /frontend/src
+          path: ../../src
+          target: ./src
           ignore:
             - node_modules/
         - action: rebuild
-          path: ../../frontend/package.json
+          path: ../../package.json
     ports:
       - 3001:3000

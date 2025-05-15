@@ -1,9 +1,0 @@
-FROM node:20-alpine
-
-WORKDIR /backend
-
-COPY ./backend ./
-
-RUN apk --no-cache add python3 ffmpeg && yarn install
-
-CMD ["yarn", "dev"]

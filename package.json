@@ -1,9 +1,51 @@
 {
+  "name": "av-converter",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@ffmpeg/core-mt": "^0.12.10",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
+    "@reduxjs/toolkit": "2.8.1",
+    "@types/react-dom": "19.1.5",
+    "bootstrap": "^5.3.6",
+    "react": "19.1.0",
+    "react-bootstrap": "^2.10.10",
+    "react-dom": "19.1.0",
+    "react-redux": "9.2.0",
+    "react-router-dom": "7.6.0",
+    "react-scripts": "5.0.1"
+  },
   "scripts": {
-    "deploy-frontend": "cd frontend && yarn install && yarn build",
-    "deploy-backend": "cd backend && yarn deploy",
+    "deploy": "yarn install && yarn build",
     "dev": "cd docker/dev && docker compose up --build --watch",
-    "dev-backend": "cd docker/dev && docker compose up backend --build --watch",
-    "dev-frontend": "cd docker/dev && docker compose up frontend --build --watch"
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "@types/reach__router": "^1.3.10",
+    "@types/react": "^18.0.15",
+    "prettier": "2.2.1",
+    "typescript": "^4.7.4"
   }
 }

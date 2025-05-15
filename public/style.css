@@ -1,0 +1,115 @@
+#root {
+  text-align: center;
+  font-family: Arial, Helvetica, sans-serif;
+  /* font-family: "Lucida Console", Courier, monospace; */
+  /* font-family: "Times New Roman", Times, serif; */
+  /* font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif */
+}
+
+.top {
+  background-color: black;
+  overflow: hidden;
+}
+.top a {
+  float: left;
+  display: block;
+  color: white;
+  text-align: center;
+  padding: 10px;
+}
+#github_link {
+  float: right;
+}
+/* When hovering over a link on the navigation bar */
+.top a:hover {
+  background-color: lightgreen;
+  color: black;
+}
+
+h1 {
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 225% !important;
+  text-align: center;
+  background: black;
+  color: white;
+  margin-bottom: 0 !important;
+  padding-bottom: 5px;
+}
+
+#powered_by {
+  margin-bottom: 20px;
+  font-size: 80%;
+  color: white;
+  background: black;
+}
+#ffmpeg {
+  margin-right: 5px;
+}
+#ffmpeg_logo {
+  margin-right: 5px;
+}
+#webassembly {
+  margin-right: 5px;
+}
+
+.slider {
+  -webkit-appearance: none;
+  width: 50%;
+  height: 15px;
+  background-color: black;
+  outline: none;
+}
+/* The slider handle (webkit - applies to Chrome, Opera, Safari, Edge). */
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  background: blue;
+  cursor: pointer;
+}
+/* moz - applies to Firefox.  */
+.slider::-moz-range-thumb {
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  background: #4caf50;
+  cursor: pointer;
+}
+
+/* Don't show the hamburger button on screens displays larger than 880 pixels wide. */
+.top .hamburger {
+  display: none;
+}
+
+/* When the display is 880 pixels wide or less. */
+@media screen and (max-width: 880px) {
+  /* Don't show the links */
+  .top a {
+    display: none;
+  }
+  #github_link {
+    display: block;
+  }
+  .top a.hamburger {
+    background-color: black;
+    color: white;
+    display: block; /* Show hamburger menu */
+    float: left;
+  }
+  .top.mobile a {
+    /* The links */
+    text-align: left;
+    float: none; /* Display the links vertically instead of horizontally) */
+    display: block;
+  }
+}
+
+/* Filetypes page. */
+.videofiletypes,
+.outputformats,
+.audiofiletypes {
+  float: left;
+  width: 33%;
+}
