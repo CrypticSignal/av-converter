@@ -1,12 +1,11 @@
 import React, { useState, useRef } from 'react';
 import { Routes, Route } from 'react-router';
 import { useAppSelector } from './redux/hooks';
-// Converter
-import { FFmpeg } from '@ffmpeg/ffmpeg'
+
+import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { convertFile } from './utils/convertFile';
 import { createFFmpegArgs } from './utils/createFFmpegArgs';
 // General Components
-import AlertDiv from './components/AlertDiv';
 import BitrateSlider from './components/BitrateSlider';
 import ConvertButton from './components/ConvertButton';
 import FileInput from './components/FileInput';
@@ -30,14 +29,15 @@ import WavBitDepthSelector from './components/WavBitDepthSelector';
 import AboutPage from './pages/AboutPage';
 import Filetypes from './pages/SupportedFiletypes';
 // React-Bootstrap
-import Alert from 'react-bootstrap/Alert';
 import Container from 'react-bootstrap/Container';
 import ProgressBar from 'react-bootstrap/ProgressBar';
 import Spinner from 'react-bootstrap/Spinner';
-// Utils
-import showAlert from './utils/showAlert';
+// Material UI
+import {Alert, AlertColor} from '@mui/material';
 
 const App: React.FC = () => {
+  const [alertMessage, setAlertMessage] = useState('');
+  const [alertSeverity, setAlertSeverity] = useState<AlertColor>('info')
   const [file, setFile] = useState<File>();
   const [inputFilename, setInputFilename] = useState('');
   const [codec, setCodec] = useState('MP3');
@@ -141,9 +141,13 @@ const App: React.FC = () => {
 
   const bitrateSliderValue = useAppSelector((state) => state.bitrate.value);
 
-  const onConvertClicked = async () => {
+  const ffmpegRef = useRef(new FFmpeg());
+  const ffmpeg = ffmpegRef.current;
+
+  const onConvertClicked = () => {
     if (file === undefined) {
-      showAlert('You must choose an input file.', 'danger');
+      setAlertSeverity('error');
+      setAlertMessage('You must choose an input file.');
       return;
     }
 
@@ -178,7 +182,8 @@ const App: React.FC = () => {
     const { ffmpegArgs, outputFilename } = conversionData;
     
     if (outputFilename === inputFilename) {
-      showAlert('Output filename cannot be same as the input filename.', 'danger');
+      setAlertSeverity('error');
+      setAlertMessage('Output filename cannot be same as the input filename.');
       return;
     }
 
@@ -187,8 +192,8 @@ const App: React.FC = () => {
     ffmpegArgs.push(outputFilename);
 
     document.getElementById('convert_btn')!.style.display = 'none';
-    convertFile(file, ffmpegArgs, inputFilename, outputFilename, setProgress);
- 
+    
+    convertFile(ffmpeg, file, ffmpegArgs, inputFilename, outputFilename, setProgress, setAlertMessage, setAlertSeverity);
   };
 
   const showFormatSettings = () => {
@@ -334,16 +339,15 @@ const App: React.FC = () => {
               />
 
               <div id="converting_spinner" style={{ display: 'none' }}>
-                <Spinner id="converting_btn" animation="border" /> Converting...
+                <Spinner id="converting_btn" animation="border" />Converting...
               </div>
 
               <div id="conversion_progress" style={{ display: 'none' }}>
                 <ProgressBar now={progress} label={`${progress}%`} />
               </div>
 
-              <Alert variant={variant}>
-                  This is a {variant} alert—check it out!
-              </Alert>
+              <br />
+              {alertMessage && <Alert severity={alertSeverity}>{alertMessage}</Alert>}
 
               <div id="convert_btn">
                 <br />

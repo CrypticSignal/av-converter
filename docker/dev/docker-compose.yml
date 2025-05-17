@@ -11,6 +11,9 @@ services:
           target: ./src
           ignore:
             - node_modules/
+        - action: sync
+          path: ../../public
+          target: ./public
         - action: rebuild
           path: ../../package.json
     ports:

@@ -1,42 +1,40 @@
-import { FFmpeg } from '@ffmpeg/ffmpeg';
+import type { FFmpeg } from '@ffmpeg/ffmpeg';
 import { toBlobURL, fetchFile } from '@ffmpeg/util'
-import { Dispatch, SetStateAction, useRef } from 'react';
-import Alert from 'react-bootstrap/Alert';
+import { Dispatch, SetStateAction } from 'react';
 import reset from './reset';
+import { AlertColor } from '@mui/material';
 
 export const convertFile = async (
+  ffmpeg: FFmpeg,
   file: File,
   ffmpegArgs: string[],
   inputFilename: string,
   outputFilename: string,
-  setProgress: Dispatch<SetStateAction<number>>
+  setProgress: Dispatch<SetStateAction<number>>,
+  setAlertMessage: React.Dispatch<React.SetStateAction<string>>,
+  setAlertSeverity: React.Dispatch<React.SetStateAction<AlertColor>>
 ) => {
-  showAlert('Loading @ffmpeg/core-mt...', 'warning');
+  setAlertSeverity('info');
+  setAlertMessage('Loading @ffmpeg/core-mt...');
 
-  const ffmpegRef = useRef(new FFmpeg());
-  const ffmpeg = ffmpegRef.current;
+  const baseURL = "/ffmpeg_wasm";
 
-  const baseURL = "https://unpkg.com/@ffmpeg/core-mt@0.12.10/dist/esm";
-
-  // Using toBlobURL to fix the following error:
-  //SecurityError: Failed to construct 'Worker': Script at 'https://unpkg.com/@ffmpeg/core-mt@0.12.10/dist/esm/ffmpeg-core.worker.js' cannot be accessed from origin 'https://av-converter.com'.
   await ffmpeg.load({
-    coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-    wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-    workerURL: await toBlobURL(
-      `${baseURL}/ffmpeg-core.worker.js`,
-      'text/javascript'
-    ),
+    coreURL: `${baseURL}/ffmpeg-core.js`,
+    wasmURL: `${baseURL}/ffmpeg-core.wasm`,
+    workerURL: `${baseURL}/ffmpeg-core.worker.js`
   });
 
   ffmpeg.on('log', ({ message }) => {
     if (message === 'Aborted()') {
       reset();
-      showAlert('Unable to convert file.', 'danger');
+      setAlertSeverity('error');
+      setAlertMessage('Unable to convert file.');
       return;
     }
 
-    showAlert(message, 'info');
+    setAlertSeverity('info');
+    setAlertMessage(message);
   });
 
   ffmpeg.on('progress', ({ progress }) => {
@@ -62,10 +60,8 @@ export const convertFile = async (
   anchorTag.download = outputFilename;
   anchorTag.click();
 
-  showAlert(
-    `The converted file should have downloaded to your device.<br>If it hasn't, click <a href="${objectURL}" download="${outputFilename}">here</a>`,
-    'success'
-  );
+  setAlertSeverity('success');
+  setAlertMessage("Done! The converted file should have started downloading.");
 
   reset();
 };

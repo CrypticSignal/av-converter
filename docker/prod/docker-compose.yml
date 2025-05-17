@@ -12,8 +12,7 @@ services:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ../../build:/usr/share/nginx/html:ro
       - ../../src/game:/game:ro
-      - ./ffmpeg_wasm:/var/www/ffmpeg:ro
-      
+      - ../../ffmpeg_wasm:/ffmpeg_wasm
   certbot:
     container_name: certbot
     image: certbot/certbot:latest

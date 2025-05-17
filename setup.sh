@@ -107,7 +107,7 @@ events {}
 
 http {
     include mime.types;
-
+    
     server {
         listen 80;
         server_name av-converter.com;
@@ -123,15 +123,15 @@ http {
         ssl_certificate     /etc/letsencrypt/live/av-converter.com/fullchain.pem;
         ssl_certificate_key /etc/letsencrypt/live/av-converter.com/privkey.pem;
 
-        location / {
-            root /usr/share/nginx/html;
-            try_files $uri /index.html =404;
+        location /ffmpeg_wasm {
             add_header 'Cross-Origin-Embedder-Policy' 'require-corp';
             add_header 'Cross-Origin-Opener-Policy' 'same-origin';
+            alias /ffmpeg_wasm/;
+            try_files $uri =404;
+        }
 
-            # Disable caching
-            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
-            expires off;
+        location ~ /.well-known/acme-challenge/ {
+            root /var/www/certbot;
         }
 
         location /game {
@@ -139,8 +139,15 @@ http {
             try_files $uri /game.html;
         }
 
-        location ~ /.well-known/acme-challenge/ {
-            root /var/www/certbot;
+        location / {
+            add_header 'Cross-Origin-Embedder-Policy' 'require-corp';
+            add_header 'Cross-Origin-Opener-Policy' 'same-origin';
+            root /usr/share/nginx/html;
+            try_files $uri /index.html =404;
+
+            # Disable caching
+            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
+            expires off;
         }
     }
 }
