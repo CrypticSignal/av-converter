@@ -7,7 +7,7 @@ interface IsKeepVideoProps {
 
 const IsKeepVideo: React.FC<IsKeepVideoProps> = ({ onIsKeepVideoChange, isKeepVideo }) => {
   return (
-    <div id="keep_video_div" onChange={onIsKeepVideoChange}>
+    <div id="keep_video_div">
       <br />
       <div className="form-check">
         <label className="form-check-label">
@@ -17,6 +17,7 @@ const IsKeepVideo: React.FC<IsKeepVideoProps> = ({ onIsKeepVideoChange, isKeepVi
             className="form-check-input"
             value="yes"
             checked={isKeepVideo}
+            name="isKeepVideoOption"
           />
           Keep the video (if applicable)
         </label>
@@ -29,6 +30,7 @@ const IsKeepVideo: React.FC<IsKeepVideoProps> = ({ onIsKeepVideoChange, isKeepVi
             className="form-check-input"
             value="no"
             checked={!isKeepVideo}
+            name="isKeepVideoOption"
           />
           I want an audio file
         </label>

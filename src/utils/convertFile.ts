@@ -1,7 +1,6 @@
 import type { FFmpeg } from '@ffmpeg/ffmpeg';
-import { toBlobURL, fetchFile } from '@ffmpeg/util'
+import { fetchFile } from '@ffmpeg/util'
 import { Dispatch, SetStateAction } from 'react';
-import reset from './reset';
 import { AlertColor } from '@mui/material';
 
 export const convertFile = async (
@@ -12,56 +11,60 @@ export const convertFile = async (
   outputFilename: string,
   setProgress: Dispatch<SetStateAction<number>>,
   setAlertMessage: React.Dispatch<React.SetStateAction<string>>,
-  setAlertSeverity: React.Dispatch<React.SetStateAction<AlertColor>>
+  setAlertSeverity: React.Dispatch<React.SetStateAction<AlertColor>>,
+  setIsConverting: Dispatch<SetStateAction<boolean>>
 ) => {
-  setAlertSeverity('info');
-  setAlertMessage('Loading @ffmpeg/core-mt...');
-
-  const baseURL = "/ffmpeg_wasm";
-
-  await ffmpeg.load({
-    coreURL: `${baseURL}/ffmpeg-core.js`,
-    wasmURL: `${baseURL}/ffmpeg-core.wasm`,
-    workerURL: `${baseURL}/ffmpeg-core.worker.js`
-  });
-
-  ffmpeg.on('log', ({ message }) => {
-    if (message === 'Aborted()') {
-      reset();
-      setAlertSeverity('error');
-      setAlertMessage('Unable to convert file.');
-      return;
-    }
-
+  setIsConverting(true);
+  try {
     setAlertSeverity('info');
-    setAlertMessage(message);
-  });
+    setAlertMessage('Loading @ffmpeg/core-mt...');
 
-  ffmpeg.on('progress', ({ progress }) => {
-    progress = Math.round(progress * 100 * 10) / 10;
-    setProgress(progress);
-  });
+    const baseURL = "/ffmpeg_wasm";
 
-  await ffmpeg.writeFile(inputFilename, await fetchFile(file));
+    await ffmpeg.load({
+      coreURL: `${baseURL}/ffmpeg-core.js`,
+      wasmURL: `${baseURL}/ffmpeg-core.wasm`,
+      workerURL: `${baseURL}/ffmpeg-core.worker.js`
+    });
 
-  document.getElementById('converting_spinner')!.style.display = 'block';
-  document.getElementById('conversion_progress')!.style.display = 'block';
+    ffmpeg.on('log', ({ message }) => {
+      if (message === 'Aborted()') {
+        setAlertSeverity('error');
+        setAlertMessage('Unable to convert file.');
+        return;
+      }
 
-  await ffmpeg.exec(ffmpegArgs);
+      setAlertSeverity('info');
+      setAlertMessage(message);
+    });
 
-  setProgress(0);
+    ffmpeg.on('progress', ({ progress }) => {
+      progress = Math.round(progress * 100 * 10) / 10;
+      setProgress(progress);
+    });
 
-  const fileData = await ffmpeg.readFile(outputFilename);
-  const data = new Uint8Array(fileData as unknown as ArrayBuffer);
-  const objectURL = URL.createObjectURL(new Blob([data.buffer]));
+    await ffmpeg.writeFile(inputFilename, await fetchFile(file));
 
-  const anchorTag = document.createElement('a');
-  anchorTag.href = objectURL;
-  anchorTag.download = outputFilename;
-  anchorTag.click();
+    await ffmpeg.exec(ffmpegArgs);
 
-  setAlertSeverity('success');
-  setAlertMessage("Done! The converted file should have started downloading.");
+    setProgress(0);
 
-  reset();
+    const fileData = await ffmpeg.readFile(outputFilename);
+    const data = new Uint8Array(fileData as unknown as ArrayBuffer);
+    const objectURL = URL.createObjectURL(new Blob([data.buffer]));
+
+    const anchorTag = document.createElement('a');
+    anchorTag.href = objectURL;
+    anchorTag.download = outputFilename;
+    anchorTag.click();
+
+    setAlertSeverity('success');
+    setAlertMessage("Done! The converted file should have started downloading.");
+  } catch (error) {
+    console.error(error);
+    setAlertSeverity('error');
+    setAlertMessage('An error occurred during conversion.');
+  } finally {
+    setIsConverting(false);
+  }
 };

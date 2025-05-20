@@ -68,7 +68,7 @@ yarn install
 
 # https://github.com/ffmpegwasm/ffmpeg.wasm/issues/619#issuecomment-2726185799
 log "Replacing node_modules/@ffmpeg/ffmpeg/dist/esm/worker.js..."
-cp worker.js node_modules/@ffmpeg/ffmpeg/dist/esm/worker.js
+cp ffmpeg_wasm/worker.js node_modules/@ffmpeg/ffmpeg/dist/esm/worker.js
 
 log "Building the project..."
 yarn build

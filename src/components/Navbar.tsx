@@ -1,37 +1,25 @@
-import { Link } from "react-router-dom";
 import gitHubLogo from "../images/GitHub-Mark-Light-32px.png";
 
 const Navbar = () => {
-  const setClassName = (event: React.MouseEvent<HTMLElement>) => {
-    event.preventDefault();
-    let linksDiv = document.getElementById("links")!;
-    if (linksDiv.className === "top") {
-      linksDiv.className += " mobile";
-    } else {
-      linksDiv.className = "top";
-    }
-  };
-
   return (
-    <div id="links" className="top">
-      <Link to="/" className="hamburger" onClick={setClassName}>
-        <i className="fa fa-bars"></i>
-      </Link>
-      <Link to="/">Home</Link>
-      <Link to="/about">About</Link>
-      <Link to="/filetypes">Filetypes</Link>
-      <Link
-        to="/game"
-        onClick={() => {
-          window.location.href = "game";
-        }}
-      >
-        Game
-      </Link>
-      <a href="https://github.com/CrypticSignal/av-converter" id="github_link">
-        <img src={gitHubLogo} alt="github logo" />
-      </a>
-    </div>
+    <nav className="bg-black text-white">
+      <div className="flex items-center justify-between p-2.5">
+        <div className="flex items-center">
+          <a
+            href="/game"
+            className="text-white text-center hover:bg-green-300 hover:text-black px-3 py-2 rounded-md"
+          >
+            Game
+          </a>
+        </div>
+        <a
+          href="https://github.com/CrypticSignal/av-converter"
+          className="text-white hover:bg-green-300 hover:text-black p-2 rounded-md"
+        >
+          <img src={gitHubLogo} alt="github logo" className="block h-8 w-8" />
+        </a>
+      </div>
+    </nav>
   );
 };
 

@@ -1,4 +1,5 @@
 import React from "react";
+import Button from "@mui/material/Button";
 
 interface ConvertButtonProps {
   onConvertClicked: () => void;
@@ -6,9 +7,13 @@ interface ConvertButtonProps {
 
 const ConvertButton: React.FC<ConvertButtonProps> = ({ onConvertClicked }) => {
   return (
-    <button id="convert_btn" className="btn btn-primary" onClick={onConvertClicked}>
+    <Button
+      variant="contained"
+      color="primary"
+      onClick={onConvertClicked}
+    >
       Convert
-    </button>
+    </Button>
   );
 };
 

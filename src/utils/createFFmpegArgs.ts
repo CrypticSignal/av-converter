@@ -1,167 +1,198 @@
+export interface EncodingOptions {
+  ac3Bitrate: string;
+  bitrateSliderValue: string;
+  codec: string;
+  crfValue: string;
+  flacCompression: string;
+  isKeepVideo: boolean;
+  mp3EncodingType: string;
+  mp3VbrSetting: string;
+  opusEncodingType: string;
+  qValue: string;
+  transcodeVideo: boolean;
+  transcodeAudio: boolean;
+  videoBitrate: string;
+  videoContainer: string;
+  videoEncodingType: string;
+  vorbisEncodingType: string;
+  wavBitDepth: string;
+  x264Preset: string;
+}
+
 interface ConversionData {
   ffmpegArgs: string[];
   outputFilename: string;
 }
 
-const createConversionData = (
-  encodingArgs: string,
+const returnConversionData = (
+  inputFilename: string,
+  encodingArgs: string[],
   outputFilename: string
 ): ConversionData => {
-  const encodingArgsArray = encodingArgs.split(" ");
-
-  const ffmpegArgs = [
-    "-metadata",
-    "encoded_by=av-converter.com",
-    "-id3v2_version",
-    "3",
-    "-write_id3v1",
-    "true",
-    ...encodingArgsArray,
-  ];
-
   return {
-    ffmpegArgs: ffmpegArgs,
-    outputFilename: outputFilename,
+    ffmpegArgs: ["-i", inputFilename, ...encodingArgs, outputFilename],
+    outputFilename,
   };
 };
 
 export const createFFmpegArgs = (
-  ac3Bitrate: string,
-  bitrateSliderValue: string,
-  codec: string,
-  crfValue: string,
-  flacCompression: string,
-  isKeepVideo: boolean,
   inputFilename: string,
-  mp3EncodingType: string,
-  mp3VbrSetting: string,
-  numLogicalProcessors: number,
-  opusEncodingType: string,
-  outputName: string,
-  qValue: string,
-  transcodeVideo: boolean,
-  transcodeAudio: boolean,
-  videoBitrate: string,
-  videoContainer: string,
-  videoEncodingType: string,
-  vorbisEncodingType: string,
-  wavBitDepth: string,
-  x264Preset: string
-) => {
+  options: EncodingOptions,
+  outputName: string
+): ConversionData | undefined => {
+  const {
+    ac3Bitrate,
+    bitrateSliderValue,
+    codec,
+    crfValue,
+    flacCompression,
+    isKeepVideo,
+    mp3EncodingType,
+    mp3VbrSetting,
+    opusEncodingType,
+    qValue,
+    transcodeVideo,
+    transcodeAudio,
+    videoBitrate,
+    videoContainer,
+    videoEncodingType,
+    vorbisEncodingType,
+    wavBitDepth,
+    x264Preset,
+  } = options;
   const ext = inputFilename.substring(inputFilename.lastIndexOf("."));
+  let encodingArgs: string[] = [];
+
+  const copyVideoStream = ["-c:V", "copy"];
 
   switch (codec) {
     case "AAC":
-      return createConversionData(
-        `${
-          isKeepVideo ? "-c:v copy " : ""
-        }-c:a aac -b:a ${bitrateSliderValue}k`,
+      if (isKeepVideo) encodingArgs.push(...copyVideoStream);
+      encodingArgs.push(...["-c:a", "aac", "-b:a", `${bitrateSliderValue}k`]);
+      return returnConversionData(
+        inputFilename,
+        encodingArgs,
         `${outputName}${isKeepVideo ? ext : ".aac"}`
       );
 
     case "AC3":
-      return createConversionData(
-        `${isKeepVideo ? "-c:v copy " : ""}-c:a ac3 -b:a ${ac3Bitrate}k`,
+      if (isKeepVideo) encodingArgs.push(...copyVideoStream);
+      encodingArgs.push(...["-c:a", "ac3", "-b:a", `${ac3Bitrate}k`]);
+      return returnConversionData(
+        inputFilename,
+        encodingArgs,
         `${outputName}${isKeepVideo ? ext : ".ac3"}`
       );
 
     case "ALAC":
-      return createConversionData(
-        `${isKeepVideo ? "-c:v copy " : ""}-c:a alac`,
+      if (isKeepVideo) encodingArgs.push(...copyVideoStream);
+      encodingArgs.push(...["-c:a", "alac"]);
+      return returnConversionData(
+        inputFilename,
+        encodingArgs,
         `${outputName}.${isKeepVideo ? "mkv" : "m4a"}`
       );
 
     case "CAF":
-      return createConversionData(`-c:a alac`, `${outputName}.caf`);
+      encodingArgs.push(...["-c:a", "alac"]);
+      return returnConversionData(inputFilename, encodingArgs, `${outputName}.caf`);
 
     case "DTS":
-      return createConversionData(
-        `${
-          isKeepVideo ? "-c:v copy " : ""
-        }-c:a dca -b:a ${bitrateSliderValue}k -strict -2`,
+      if (isKeepVideo) encodingArgs.push(...copyVideoStream);
+      encodingArgs.push(
+        ...["-c:a", "dca", "-b:a", `${bitrateSliderValue}k`, "-strict", "-2"]
+      );
+      return returnConversionData(
+        inputFilename,
+        encodingArgs,
         `${outputName}${isKeepVideo ? ext : ".dts"}`
       );
 
     case "FLAC":
-      return createConversionData(
-        `${
-          isKeepVideo ? "-map 0 -c:v copy -c:s copy" : ""
-        } -map 0:a -c:a flac -compression_level ${flacCompression}`,
+      if (isKeepVideo) encodingArgs.push(...["-map", "0", ...copyVideoStream, "-c:s", "copy"]);
+      encodingArgs.push(
+        ...["-map", "0:a", "-c:a", "flac", "-compression_level", flacCompression]
+      );
+      return returnConversionData(
+        inputFilename,
+        encodingArgs,
         `${outputName}.${isKeepVideo ? "mkv" : "flac"}`
       );
 
     case "H264":
-      const outputFilename = `${outputName}.${videoContainer}`;
+      const h264OutputFilename = `${outputName}.${videoContainer}`;
+      encodingArgs.push(...["-map", "0:V?", "-map", "0:a?", "-map", "0:s?"]);
 
-      let args = "-map 0:V? -map 0:a? -map 0:s?";
-      transcodeAudio ? (args += " -c:a aac -b:a 256k") : (args += " -c:a copy");
+      if (transcodeAudio) {
+        encodingArgs.push(...["-c:a", "aac", "-b:a", "256k"]);
+      } else {
+        encodingArgs.push(...["-c:a", "copy"]);
+      }
 
       if (!transcodeVideo) {
-        videoContainer === "mp4"
-          ? (args += " -c:V copy -f mp4")
-          : (args += " -c:V copy -c:s copy -f matroska");
-
-        return createConversionData(args, outputFilename);
+        encodingArgs.push(...copyVideoStream);
+        if (videoContainer === "mp4") {
+          encodingArgs.push(...["-f", "mp4"]);
+        } else {
+          encodingArgs.push(...["-c:s", "copy", "-f", "matroska"]);
+        }
+        return returnConversionData(inputFilename, encodingArgs, h264OutputFilename);
       }
 
-      // MP4 doesn't support all subtitle formats. Convert the subtitle tracks to mov_text which MP4 supports.
       if (videoContainer === "mp4") {
-        args += " -c:s mov_text";
+        encodingArgs.push(...["-c:s", "mov_text"]);
       }
 
-      args += ` -c:V libx264 -preset ${x264Preset}`;
+      encodingArgs.push(...["-c:V", "libx264", "-preset", x264Preset]);
 
-      videoEncodingType === "crf"
-        ? (args += ` -crf ${crfValue}`)
-        : (args += ` -b:v ${videoBitrate}M`);
-
-      return createConversionData(args, outputFilename);
+      if (videoEncodingType === "crf") {
+        encodingArgs.push(...["-crf", crfValue]);
+      } else {
+        encodingArgs.push(...["-b:v", `${videoBitrate}M`]);
+      }
+      return returnConversionData(inputFilename, encodingArgs, h264OutputFilename);
 
     case "MKA":
-      return createConversionData(`-map 0:a -c:a copy`, `${outputName}.mka`);
+      encodingArgs.push(...["-map", "0:a", "-c:a", "copy"]);
+      return returnConversionData(inputFilename, encodingArgs, `${outputName}.mka`);
 
     case "MP3":
-      const outputExt = isKeepVideo ? (ext === ".mp4" ? ext : ".mkv") : ".mp3";
+      const mp3OutputExt = isKeepVideo ? (ext === ".mp4" ? ext : ".mkv") : ".mp3";
+      if (isKeepVideo) encodingArgs.push(...copyVideoStream);
+      encodingArgs.push(...["-c:a", "libmp3lame"]);
 
-      if (mp3EncodingType === "cbr" || mp3EncodingType === "abr") {
-        return createConversionData(
-          `${isKeepVideo ? "-c:v copy " : ""}-c:a libmp3lame ${
-            mp3EncodingType === "cbr" ? "" : "--abr 1"
-          }-b:a ${bitrateSliderValue}k`,
-          `${outputName}${outputExt}`
-        );
+      if (mp3EncodingType === "cbr") {
+        encodingArgs.push(...["-b:a", `${bitrateSliderValue}k`]);
+      } else if (mp3EncodingType === "abr") {
+        encodingArgs.push(...["--abr", "1", "-b:a", `${bitrateSliderValue}k`]);
+      } else { // VBR
+        encodingArgs.push(...["-q:a", mp3VbrSetting]);
       }
-
-      // VBR
-      return createConversionData(
-        `${
-          isKeepVideo ? "-c:v copy " : ""
-        }-c:a libmp3lame -q:a ${mp3VbrSetting}`,
-        `${outputName}${isKeepVideo ? outputExt : ".mp3"}`
+      return returnConversionData(
+        inputFilename,
+        encodingArgs,
+        `${outputName}${mp3OutputExt}`
       );
 
     case "Opus":
-      return createConversionData(
-        `-c:a libopus ${
-          opusEncodingType === "cbr" ? "-vbr off " : ""
-        }-b:a ${bitrateSliderValue}k`,
-        `${outputName}.opus`
-      );
+      encodingArgs.push(...["-c:a", "libopus"]);
+      if (opusEncodingType === "cbr") {
+        encodingArgs.push(...["-vbr", "off"]);
+      }
+      encodingArgs.push(...["-b:a", `${bitrateSliderValue}k`]);
+      return returnConversionData(inputFilename, encodingArgs, `${outputName}.opus`);
 
     case "Vorbis":
-      return createConversionData(
-        `-map 0:a -c:a libvorbis ${
-          vorbisEncodingType === "abr"
-            ? `-b:a ${bitrateSliderValue}k`
-            : `-q:a ${qValue}`
-        }`,
-        `${outputName}.ogg`
-      );
+      encodingArgs.push(...["-map", "0:a", "-c:a", "libvorbis"]);
+      if (vorbisEncodingType === "abr") {
+        encodingArgs.push(...["-b:a", `${bitrateSliderValue}k`]);
+      } else { // VBR
+        encodingArgs.push(...["-q:a", qValue]);
+      }
+      return returnConversionData(inputFilename, encodingArgs, `${outputName}.ogg`);
 
     case "WAV":
-      return createConversionData(
-        `-c:a pcm_s${wavBitDepth}le`,
-        `${outputName}.wav`
-      );
+      encodingArgs.push(...["-c:a", `pcm_s${wavBitDepth}le`]);
+      return returnConversionData(inputFilename, encodingArgs, `${outputName}.wav`);
   }
 };
