@@ -35,65 +35,57 @@ const H264: React.FC<H264Props> = ({
   crfValue,
 }) => {
   return (
-    <div id="video">
+    <>
       <label htmlFor="video_container">Output Container: </label>
       <select id="video_container" onChange={onVideoContainerChange} value={videoContainer}>
         <option value="mp4">MP4 (.mp4)</option>
         <option value="mkv">MKV (.mkv)</option>
       </select>
+
+      <br /><br />
+
       <div id="should_transcode">
-        <div className="form-check">
-          <label className="form-check-label">
-            <input
-              type="radio"
-              onChange={onTranscodeVideoChange}
-              className="form-check-input"
-              value="yes"
-              checked={transcodeVideo}
-            />
-            Change the video codec to H.264/AVC
-          </label>
-        </div>
-        <div className="form-check">
-          <label className="form-check-label">
-            <input
-              type="radio"
-              onChange={onTranscodeVideoChange}
-              className="form-check-input"
-              value="no"
-              checked={!transcodeVideo}
-            />
-            Don't transcode the video but change the format to {videoContainer.toUpperCase()}
-          </label>
-        </div>
+        <label>
+          <input
+            type="radio"
+            onChange={onTranscodeVideoChange}
+            className="mr-1"
+            value="yes"
+            checked={transcodeVideo}
+          />
+          Change the video codec to H.264/AVC
+        </label>
+        <label className="block">
+          <input
+            type="radio"
+            onChange={onTranscodeVideoChange}
+            className="mr-1"
+            value="no"
+            checked={!transcodeVideo}
+          />
+          Don't transcode the video but change the format to {videoContainer.toUpperCase()}
+        </label>
       </div>
-      <input type="checkbox" onChange={onTranscodeAudioCheckboxChange} checked={transcodeAudio} />{" "}
-      <label>Transcode the audio to AAC</label>
+
       <br />
+
+      <label>
+        <input type="checkbox" onChange={onTranscodeAudioCheckboxChange} checked={transcodeAudio} />
+        Transcode the audio to AAC
+      </label>
       <i style={{ display: transcodeAudio ? "block" : "none" }}>
         The audio bitrate will be set to 256 kbps.
       </i>
+
       <div id="video_encoding_type" style={{ display: transcodeVideo ? "block" : "none" }}>
         <br />
         <label htmlFor="video_encoding_type">Encoding Type:</label>
         <select onChange={onVideoEncodingTypeChange} value={videoEncodingType}>
           <option value="crf">CRF (constant quality)</option>
-          {/* <option value="filesize">Target a filesize</option> */}
           <option value="bitrate">Target a bitrate (Mbps)</option>
         </select>
       </div>
-      <div id="x264_preset_div" style={{ display: transcodeVideo ? "block" : "none" }}>
-        <label htmlFor="x264_preset">x264 preset:</label>
-        <select onChange={onX264PresetChange} value={x264Preset}>
-          <option value="veryslow">veryslow</option>
-          <option value="slower">slower</option>
-          <option value="slow">slow</option>
-          <option value="medium">medium</option>
-          <option value="fast">fast</option>
-          <option value="superfast">superfast</option>
-          <option value="ultrafast">ultrafast</option>
-        </select>
-      </div>
+
       <div
         id="target_bitrate_div"
         style={{ display: videoEncodingType === "bitrate" ? "block" : "none" }}
@@ -104,16 +96,7 @@ const H264: React.FC<H264Props> = ({
           units="Mbps"
         />
       </div>
-      {/* <div
-        id="target_filesize_div"
-        style={{ display: videoEncodingType === "filesize" ? "block" : "none" }}
-      >
-        <NumberInput
-          onChange={onVideoFilesizeChange}
-          value={videoFilesize}
-          units="MB"
-        />
-      </div> */}
+
       <div
         id="crf_div"
         style={{ display: transcodeVideo && videoEncodingType === "crf" ? "block" : "none" }}
@@ -141,7 +124,21 @@ const H264: React.FC<H264Props> = ({
           .
         </i>
       </div>
-    </div>
+
+      <div id="x264_preset_div" style={{ display: transcodeVideo ? "block" : "none" }}>
+        <br />
+        <label htmlFor="x264_preset">x264 preset:</label>
+        <select onChange={onX264PresetChange} value={x264Preset}>
+          <option value="veryslow">veryslow</option>
+          <option value="slower">slower</option>
+          <option value="slow">slow</option>
+          <option value="medium">medium</option>
+          <option value="fast">fast</option>
+          <option value="superfast">superfast</option>
+          <option value="ultrafast">ultrafast</option>
+        </select>
+      </div>
+    </>
   );
 };
 

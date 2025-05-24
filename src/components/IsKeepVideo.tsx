@@ -9,32 +9,26 @@ const IsKeepVideo: React.FC<IsKeepVideoProps> = ({ onIsKeepVideoChange, isKeepVi
   return (
     <div id="keep_video_div">
       <br />
-      <div className="form-check">
-        <label className="form-check-label">
-          <input
-            type="radio"
-            onChange={onIsKeepVideoChange}
-            className="form-check-input"
-            value="yes"
-            checked={isKeepVideo}
-            name="isKeepVideoOption"
-          />
-          Keep the video (if applicable)
-        </label>
-      </div>
-      <div className="form-check">
-        <label className="form-check-label">
-          <input
-            type="radio"
-            onChange={onIsKeepVideoChange}
-            className="form-check-input"
-            value="no"
-            checked={!isKeepVideo}
-            name="isKeepVideoOption"
-          />
-          I want an audio file
-        </label>
-      </div>
+      <label>
+        <input
+          className="mr-1"
+          type="radio"
+          onChange={onIsKeepVideoChange}
+          value="yes"
+          checked={isKeepVideo}
+        />
+        Keep the video (if applicable)
+      </label>
+      <label className="block">
+        <input
+          className="mr-1"
+          type="radio"
+          onChange={onIsKeepVideoChange}
+          value="no"
+          checked={!isKeepVideo}
+        />
+        I want an audio file
+      </label>
     </div>
   );
 };
