@@ -1,5 +1,5 @@
 import type { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile } from '@ffmpeg/util'
+import { fetchFile, toBlobURL } from '@ffmpeg/util'
 import { Dispatch, SetStateAction } from 'react';
 import { AlertColor } from '@mui/material';
 
@@ -21,10 +21,13 @@ export const convertFile = async (
 
     const baseURL = "/ffmpeg_wasm";
 
+
+// Using toBlobURL fixes the following error:
+// Failed to load url /ffmpeg_wasm/ffmpeg-core.js (resolved id: /ffmpeg_wasm/ffmpeg-core.js). This file is in /public and will be copied as-is during build without going through the plugin transforms, and therefore should not be imported from source code. It can only be referenced via HTML tags.
     await ffmpeg.load({
-      coreURL: `${baseURL}/ffmpeg-core.js`,
-      wasmURL: `${baseURL}/ffmpeg-core.wasm`,
-      workerURL: `${baseURL}/ffmpeg-core.worker.js`
+      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+      workerURL: await toBlobURL(`${baseURL}/ffmpeg-core.worker.js`, 'text/javascript'),
     });
 
     ffmpeg.on('log', ({ message }) => {

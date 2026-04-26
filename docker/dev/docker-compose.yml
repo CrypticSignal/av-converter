@@ -8,13 +8,20 @@ services:
       watch:
         - action: sync
           path: ../../src
-          target: ./src
+          target: /app/src
           ignore:
             - node_modules/
         - action: sync
           path: ../../public
-          target: ./public
+          target: /app/public
+        - action: sync
+          path: ../../index.html
+          target: /app/index.html
         - action: rebuild
           path: ../../package.json
+        - action: rebuild
+          path: ../../vite.config.ts
+        - action: rebuild
+          path: ../../tsconfig.json
     ports:
       - 3001:3000
