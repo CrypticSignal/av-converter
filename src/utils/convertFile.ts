@@ -10,8 +10,8 @@ export const convertFile = async (
   inputFilename: string,
   outputFilename: string,
   setProgress: Dispatch<SetStateAction<number>>,
-  setAlertMessage: React.Dispatch<React.SetStateAction<string>>,
-  setAlertSeverity: React.Dispatch<React.SetStateAction<AlertColor>>,
+  setAlertMessage: Dispatch<SetStateAction<string>>,
+  setAlertSeverity: Dispatch<SetStateAction<AlertColor>>,
   setIsConverting: Dispatch<SetStateAction<boolean>>
 ) => {
   setIsConverting(true);
@@ -53,13 +53,17 @@ export const convertFile = async (
     setProgress(0);
 
     const fileData = await ffmpeg.readFile(outputFilename);
-    const data = new Uint8Array(fileData as unknown as ArrayBuffer);
+    const data = new Uint8Array(fileData as Uint8Array);
     const objectURL = URL.createObjectURL(new Blob([data.buffer]));
 
     const anchorTag = document.createElement('a');
     anchorTag.href = objectURL;
     anchorTag.download = outputFilename;
     anchorTag.click();
+
+    setTimeout(() => {
+      URL.revokeObjectURL(objectURL);
+    }, 100);
 
     setAlertSeverity('success');
     setAlertMessage("Done! The converted file should have started downloading.");
