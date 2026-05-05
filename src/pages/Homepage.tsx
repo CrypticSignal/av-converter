@@ -64,6 +64,8 @@ const Homepage = (): JSX.Element => {
   const [qValue, setQValue] = useState('6');
   // WAV
   const [wavBitDepth, setWavBitDepth] = useState('16');
+  // Downmix to stereo?
+  const [downmixToStereo, setDownmixToStereo] = useState(false);
 
   const onFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.currentTarget.files && e.currentTarget.files[0]) {
@@ -84,7 +86,6 @@ const Homepage = (): JSX.Element => {
   const onCodecChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setCodec(e.currentTarget.value);
   };
-
   // AC3
   const onAc3BitrateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setAc3Bitrate(e.currentTarget.value);
@@ -141,6 +142,9 @@ const Homepage = (): JSX.Element => {
   const onWavBitDepthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setWavBitDepth(e.currentTarget.value);
   };
+  const onDownmixToStereoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.currentTarget.value === 'yes' ? setDownmixToStereo(true) : setDownmixToStereo(false);
+  };
 
   const bitrateSliderValue = useAppSelector((state) => state.bitrate.value);
 
@@ -163,26 +167,73 @@ const Homepage = (): JSX.Element => {
     const outputNameValue = outputNameElement ? outputNameElement.value : '';
 
 
-    const options: EncodingOptions = { 
-      ac3Bitrate,
-      bitrateSliderValue,
-      codec,
-      crfValue,
-      flacCompression,
-      isKeepVideo,
-      mp3EncodingType,
-      mp3VbrSetting,
-      opusEncodingType,
-      qValue,
-      transcodeVideo,
-      transcodeAudio,
-      videoBitrate,
-      videoContainer,
-      videoEncodingType,
-      vorbisEncodingType,
-      wavBitDepth,
-      x264Preset,
-    };
+    let options: EncodingOptions;
+
+    switch (codec) {
+      case 'AAC':
+        options = { codec: 'AAC', bitrateSliderValue, isKeepVideo, downmixToStereo };
+        break;
+      case 'AC3':
+        options = { codec: 'AC3', ac3Bitrate, isKeepVideo, downmixToStereo };
+        break;
+      case 'ALAC':
+        options = { codec: 'ALAC', isKeepVideo, downmixToStereo };
+        break;
+      case 'CAF':
+        options = { codec: 'CAF', downmixToStereo };
+        break;
+      case 'DTS':
+        options = { codec: 'DTS', bitrateSliderValue, isKeepVideo, downmixToStereo };
+        break;
+      case 'FLAC':
+        options = { codec: 'FLAC', flacCompression, isKeepVideo, downmixToStereo };
+        break;
+      case 'H264':
+        options = {
+          codec: 'H264',
+          crfValue,
+          transcodeVideo,
+          transcodeAudio,
+          videoBitrate,
+          videoContainer,
+          videoEncodingType,
+          x264Preset,
+          downmixToStereo,
+        };
+        break;
+      case 'MKA':
+        options = { codec: 'MKA', downmixToStereo };
+        break;
+      case 'MP3':
+        options = {
+          codec: 'MP3',
+          bitrateSliderValue,
+          isKeepVideo,
+          mp3EncodingType,
+          mp3VbrSetting,
+        };
+        break;
+      case 'Opus':
+        options = { codec: 'Opus', bitrateSliderValue, opusEncodingType, downmixToStereo };
+        break;
+      case 'Vorbis':
+        options = {
+          codec: 'Vorbis',
+          bitrateSliderValue,
+          qValue,
+          vorbisEncodingType,
+          downmixToStereo,
+        };
+        break;
+      case 'WAV':
+        options = { codec: 'WAV', wavBitDepth, downmixToStereo };
+        break;
+      default:
+        setAlertSeverity('error');
+        setAlertMessage('Invalid codec selected.');
+        setIsConverting(false);
+        return;
+    }
 
     const conversionData = createFFmpegArgs(inputFilename, options, outputNameValue);
 
@@ -245,14 +296,6 @@ const Homepage = (): JSX.Element => {
             <IsKeepVideo onIsKeepVideoChange={onIsKeepVideoChange} isKeepVideo={isKeepVideo} />
           </div>
         );
-      case 'MKA':
-        return (
-          <i>
-            Only the audio streams will be kept and left as-is (no transcoding will be done). The
-            Matroska container will be used.
-          </i>
-        );
-
       case 'MP3':
         return (
           <div>
@@ -336,7 +379,36 @@ const Homepage = (): JSX.Element => {
       <Typography variant="h5" component="h2" gutterBottom>
         Encoder Settings
       </Typography>
+
       {showFormatSettings()}
+      
+      <div className="my-4">
+        <Typography variant="subtitle1" component="h3" gutterBottom>
+          Downmix to stereo?
+        </Typography>
+        <label className="mr-4">
+          <input
+            type="radio"
+            name="downmix"
+            value="yes"
+            checked={downmixToStereo}
+            onChange={onDownmixToStereoChange}
+            className="mr-1"
+          />
+          Yes
+        </label>
+        <label>
+          <input
+            type="radio"
+            name="downmix"
+            value="no"
+            checked={!downmixToStereo}
+            onChange={onDownmixToStereoChange}
+            className="mr-1"
+          />
+          No
+        </label>
+      </div>
       <Divider sx={{ my: 2 }} />
 
       <Typography variant="h5" component="h2" gutterBottom>

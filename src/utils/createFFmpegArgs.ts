@@ -1,38 +1,190 @@
-export interface EncodingOptions {
-  ac3Bitrate: string;
-  bitrateSliderValue: string;
-  codec: string;
-  crfValue: string;
-  flacCompression: string;
-  isKeepVideo: boolean;
-  mp3EncodingType: string;
-  mp3VbrSetting: string;
-  opusEncodingType: string;
-  qValue: string;
-  transcodeVideo: boolean;
-  transcodeAudio: boolean;
-  videoBitrate: string;
-  videoContainer: string;
-  videoEncodingType: string;
-  vorbisEncodingType: string;
-  wavBitDepth: string;
-  x264Preset: string;
-}
+export type EncodingOptions =
+  | {
+      codec: "AAC";
+      bitrateSliderValue: string;
+      isKeepVideo: boolean;
+      downmixToStereo: boolean;
+    }
+  | {
+      codec: "AC3";
+      ac3Bitrate: string;
+      isKeepVideo: boolean;
+      downmixToStereo: boolean;
+    }
+  | {
+      codec: "ALAC";
+      isKeepVideo: boolean;
+      downmixToStereo: boolean;
+    }
+  | {
+      codec: "CAF";
+      downmixToStereo: boolean;
+    }
+  | {
+      codec: "DTS";
+      bitrateSliderValue: string;
+      isKeepVideo: boolean;
+      downmixToStereo: boolean;
+    }
+  | {
+      codec: "FLAC";
+      flacCompression: string;
+      isKeepVideo: boolean;
+      downmixToStereo: boolean;
+    }
+  | {
+      codec: "H264";
+      crfValue: string;
+      transcodeVideo: boolean;
+      transcodeAudio: boolean;
+      videoBitrate: string;
+      videoContainer: string;
+      videoEncodingType: string;
+      x264Preset: string;
+      downmixToStereo: boolean;
+    }
+  | {
+      codec: "MKA";
+      downmixToStereo: boolean;
+    }
+  | {
+      codec: "MP3";
+      bitrateSliderValue: string;
+      isKeepVideo: boolean;
+      mp3EncodingType: string;
+      mp3VbrSetting: string;
+    }
+  | {
+      codec: "Opus";
+      bitrateSliderValue: string;
+      opusEncodingType: string;
+      downmixToStereo: boolean;
+    }
+  | {
+      codec: "Vorbis";
+      bitrateSliderValue: string;
+      qValue: string;
+      vorbisEncodingType: string;
+      downmixToStereo: boolean;
+    }
+  | {
+      codec: "WAV";
+      wavBitDepth: string;
+      downmixToStereo: boolean;
+    };
 
 interface ConversionData {
   ffmpegArgs: string[];
   outputFilename: string;
 }
 
-const returnConversionData = (
-  inputFilename: string,
-  encodingArgs: string[],
-  outputFilename: string
-): ConversionData => {
-  return {
-    ffmpegArgs: ["-i", inputFilename, ...encodingArgs, outputFilename],
-    outputFilename,
-  };
+interface CodecHandlerResult {
+  args: string[];
+  outputFilename: string;
+  isCopyAudio?: boolean;
+}
+
+const COPY_AUDIO_STREAM = ["-c:a", "copy"];
+const COPY_VIDEO_STREAM = ["-c:V", "copy"];
+
+const handleAAC = (options: Extract<EncodingOptions, { codec: "AAC" }>, outputName: string, ext: string): CodecHandlerResult => {
+  const args = [];
+  if (options.isKeepVideo) args.push(...COPY_VIDEO_STREAM);
+  args.push("-c:a", "aac", "-b:a", `${options.bitrateSliderValue}k`);
+  return { args, outputFilename: `${outputName}${options.isKeepVideo ? ext : ".aac"}` };
+};
+
+const handleAC3 = (options: Extract<EncodingOptions, { codec: "AC3" }>, outputName: string, ext: string): CodecHandlerResult => {
+  const args = [];
+  if (options.isKeepVideo) args.push(...COPY_VIDEO_STREAM);
+  args.push("-c:a", "ac3", "-b:a", `${options.ac3Bitrate}k`);
+  return { args, outputFilename: `${outputName}${options.isKeepVideo ? ext : ".ac3"}` };
+};
+
+const handleALAC = (options: Extract<EncodingOptions, { codec: "ALAC" }>, outputName: string): CodecHandlerResult => {
+  const args = [];
+  if (options.isKeepVideo) args.push(...COPY_VIDEO_STREAM);
+  args.push("-c:a", "alac");
+  return { args, outputFilename: `${outputName}.${options.isKeepVideo ? "mkv" : "m4a"}` };
+};
+
+const handleCAF = (options: Extract<EncodingOptions, { codec: "CAF" }>, outputName: string): CodecHandlerResult => {
+  return { args: ["-c:a", "alac"], outputFilename: `${outputName}.caf` };
+};
+
+const handleDTS = (options: Extract<EncodingOptions, { codec: "DTS" }>, outputName: string, ext: string): CodecHandlerResult => {
+  const args = [];
+  if (options.isKeepVideo) args.push(...COPY_VIDEO_STREAM);
+  args.push("-c:a", "dca", "-b:a", `${options.bitrateSliderValue}k`, "-strict", "-2");
+  return { args, outputFilename: `${outputName}${options.isKeepVideo ? ext : ".dts"}` };
+};
+
+const handleFLAC = (options: Extract<EncodingOptions, { codec: "FLAC" }>, outputName: string): CodecHandlerResult => {
+  const args = [];
+  if (options.isKeepVideo) args.push("-map", "0", ...COPY_VIDEO_STREAM, "-c:s", "copy");
+  args.push("-map", "0:a", "-c:a", "flac", "-compression_level", options.flacCompression);
+  return { args, outputFilename: `${outputName}.${options.isKeepVideo ? "mkv" : "flac"}` };
+};
+
+const handleH264 = (options: Extract<EncodingOptions, { codec: "H264" }>, outputName: string): CodecHandlerResult => {
+  const outputFilename = `${outputName}.${options.videoContainer}`;
+  const args = ["-map", "0:V?", "-map", "0:a?", "-map", "0:s?"];
+
+  args.push(...(options.transcodeAudio ? ["-c:a", "aac", "-b:a", "256k"] : COPY_AUDIO_STREAM));
+
+  if (!options.transcodeVideo) {
+    args.push(...COPY_VIDEO_STREAM);
+    args.push(...(options.videoContainer === "mp4" ? ["-f", "mp4"] : ["-c:s", "copy", "-f", "matroska"]));
+    return { args, outputFilename, isCopyAudio: !options.transcodeAudio };
+  }
+
+  if (options.videoContainer === "mp4") {
+    args.push("-c:s", "mov_text");
+  }
+
+  args.push("-c:V", "libx264", "-preset", options.x264Preset);
+
+  args.push(...(options.videoEncodingType === "crf" ? ["-crf", options.crfValue] : ["-b:v", `${options.videoBitrate}M`]));
+  return { args, outputFilename, isCopyAudio: !options.transcodeAudio };
+};
+
+const handleMKA = (outputName: string): CodecHandlerResult => {
+  return { args: ["-map", "0:a", ...COPY_AUDIO_STREAM], outputFilename: `${outputName}.mka`, isCopyAudio: true };
+};
+
+const handleMP3 = (options: Extract<EncodingOptions, { codec: "MP3" }>, outputName: string, ext: string): CodecHandlerResult => {
+  const outputFilename = `${outputName}${options.isKeepVideo ? (ext === ".mp4" ? ext : ".mkv") : ".mp3"}`;
+  const args = [];
+  if (options.isKeepVideo) args.push(...COPY_VIDEO_STREAM);
+  args.push("-c:a", "libmp3lame");
+
+  if (options.mp3EncodingType === "cbr") {
+    args.push("-b:a", `${options.bitrateSliderValue}k`);
+  } else if (options.mp3EncodingType === "abr") {
+    args.push("--abr", "1", "-b:a", `${options.bitrateSliderValue}k`);
+  } else { // VBR
+    args.push("-q:a", options.mp3VbrSetting);
+  }
+  return { args, outputFilename };
+};
+
+const handleOpus = (options: Extract<EncodingOptions, { codec: "Opus" }>, outputName: string): CodecHandlerResult => {
+  const args = ["-c:a", "libopus"];
+  if (options.opusEncodingType === "cbr") {
+    args.push("-vbr", "off");
+  }
+  args.push("-b:a", `${options.bitrateSliderValue}k`);
+  return { args, outputFilename: `${outputName}.opus` };
+};
+
+const handleVorbis = (options: Extract<EncodingOptions, { codec: "Vorbis" }>, outputName: string): CodecHandlerResult => {
+  const args = ["-map", "0:a", "-c:a", "libvorbis"];
+  args.push(...(options.vorbisEncodingType === "abr" ? ["-b:a", `${options.bitrateSliderValue}k`] : ["-q:a", options.qValue]));
+  return { args, outputFilename: `${outputName}.ogg` };
+};
+
+const handleWAV = (options: Extract<EncodingOptions, { codec: "WAV" }>, outputName: string): CodecHandlerResult => {
+  return { args: ["-c:a", `pcm_s${options.wavBitDepth}le`], outputFilename: `${outputName}.wav` };
 };
 
 export const createFFmpegArgs = (
@@ -40,159 +192,58 @@ export const createFFmpegArgs = (
   options: EncodingOptions,
   outputName: string
 ): ConversionData | undefined => {
-  const {
-    ac3Bitrate,
-    bitrateSliderValue,
-    codec,
-    crfValue,
-    flacCompression,
-    isKeepVideo,
-    mp3EncodingType,
-    mp3VbrSetting,
-    opusEncodingType,
-    qValue,
-    transcodeVideo,
-    transcodeAudio,
-    videoBitrate,
-    videoContainer,
-    videoEncodingType,
-    vorbisEncodingType,
-    wavBitDepth,
-    x264Preset,
-  } = options;
   const ext = inputFilename.substring(inputFilename.lastIndexOf("."));
-  let encodingArgs: string[] = [];
 
-  const copyVideoStream = ["-c:V", "copy"];
+  let result: CodecHandlerResult | undefined;
 
-  switch (codec) {
+  switch (options.codec) {
     case "AAC":
-      if (isKeepVideo) encodingArgs.push(...copyVideoStream);
-      encodingArgs.push(...["-c:a", "aac", "-b:a", `${bitrateSliderValue}k`]);
-      return returnConversionData(
-        inputFilename,
-        encodingArgs,
-        `${outputName}${isKeepVideo ? ext : ".aac"}`
-      );
-
+      result = handleAAC(options, outputName, ext);
+      break;
     case "AC3":
-      if (isKeepVideo) encodingArgs.push(...copyVideoStream);
-      encodingArgs.push(...["-c:a", "ac3", "-b:a", `${ac3Bitrate}k`]);
-      return returnConversionData(
-        inputFilename,
-        encodingArgs,
-        `${outputName}${isKeepVideo ? ext : ".ac3"}`
-      );
-
+      result = handleAC3(options, outputName, ext);
+      break;
     case "ALAC":
-      if (isKeepVideo) encodingArgs.push(...copyVideoStream);
-      encodingArgs.push(...["-c:a", "alac"]);
-      return returnConversionData(
-        inputFilename,
-        encodingArgs,
-        `${outputName}.${isKeepVideo ? "mkv" : "m4a"}`
-      );
-
+      result = handleALAC(options, outputName);
+      break;
     case "CAF":
-      encodingArgs.push(...["-c:a", "alac"]);
-      return returnConversionData(inputFilename, encodingArgs, `${outputName}.caf`);
-
+      result = handleCAF(options, outputName);
+      break;
     case "DTS":
-      if (isKeepVideo) encodingArgs.push(...copyVideoStream);
-      encodingArgs.push(
-        ...["-c:a", "dca", "-b:a", `${bitrateSliderValue}k`, "-strict", "-2"]
-      );
-      return returnConversionData(
-        inputFilename,
-        encodingArgs,
-        `${outputName}${isKeepVideo ? ext : ".dts"}`
-      );
-
+      result = handleDTS(options, outputName, ext);
+      break;
     case "FLAC":
-      if (isKeepVideo) encodingArgs.push(...["-map", "0", ...copyVideoStream, "-c:s", "copy"]);
-      encodingArgs.push(
-        ...["-map", "0:a", "-c:a", "flac", "-compression_level", flacCompression]
-      );
-      return returnConversionData(
-        inputFilename,
-        encodingArgs,
-        `${outputName}.${isKeepVideo ? "mkv" : "flac"}`
-      );
-
+      result = handleFLAC(options, outputName);
+      break;
     case "H264":
-      const h264OutputFilename = `${outputName}.${videoContainer}`;
-      encodingArgs.push(...["-map", "0:V?", "-map", "0:a?", "-map", "0:s?"]);
-
-      if (transcodeAudio) {
-        encodingArgs.push(...["-c:a", "aac", "-b:a", "256k"]);
-      } else {
-        encodingArgs.push(...["-c:a", "copy"]);
-      }
-
-      if (!transcodeVideo) {
-        encodingArgs.push(...copyVideoStream);
-        if (videoContainer === "mp4") {
-          encodingArgs.push(...["-f", "mp4"]);
-        } else {
-          encodingArgs.push(...["-c:s", "copy", "-f", "matroska"]);
-        }
-        return returnConversionData(inputFilename, encodingArgs, h264OutputFilename);
-      }
-
-      if (videoContainer === "mp4") {
-        encodingArgs.push(...["-c:s", "mov_text"]);
-      }
-
-      encodingArgs.push(...["-c:V", "libx264", "-preset", x264Preset]);
-
-      if (videoEncodingType === "crf") {
-        encodingArgs.push(...["-crf", crfValue]);
-      } else {
-        encodingArgs.push(...["-b:v", `${videoBitrate}M`]);
-      }
-      return returnConversionData(inputFilename, encodingArgs, h264OutputFilename);
-
+      result = handleH264(options, outputName);
+      break;
     case "MKA":
-      encodingArgs.push(...["-map", "0:a", "-c:a", "copy"]);
-      return returnConversionData(inputFilename, encodingArgs, `${outputName}.mka`);
-
+      result = handleMKA(outputName);
+      break;
     case "MP3":
-      const mp3OutputExt = isKeepVideo ? (ext === ".mp4" ? ext : ".mkv") : ".mp3";
-      if (isKeepVideo) encodingArgs.push(...copyVideoStream);
-      encodingArgs.push(...["-c:a", "libmp3lame"]);
-
-      if (mp3EncodingType === "cbr") {
-        encodingArgs.push(...["-b:a", `${bitrateSliderValue}k`]);
-      } else if (mp3EncodingType === "abr") {
-        encodingArgs.push(...["--abr", "1", "-b:a", `${bitrateSliderValue}k`]);
-      } else { // VBR
-        encodingArgs.push(...["-q:a", mp3VbrSetting]);
-      }
-      return returnConversionData(
-        inputFilename,
-        encodingArgs,
-        `${outputName}${mp3OutputExt}`
-      );
-
+      result = handleMP3(options, outputName, ext);
+      break;
     case "Opus":
-      encodingArgs.push(...["-c:a", "libopus"]);
-      if (opusEncodingType === "cbr") {
-        encodingArgs.push(...["-vbr", "off"]);
-      }
-      encodingArgs.push(...["-b:a", `${bitrateSliderValue}k`]);
-      return returnConversionData(inputFilename, encodingArgs, `${outputName}.opus`);
-
+      result = handleOpus(options, outputName);
+      break;
     case "Vorbis":
-      encodingArgs.push(...["-map", "0:a", "-c:a", "libvorbis"]);
-      if (vorbisEncodingType === "abr") {
-        encodingArgs.push(...["-b:a", `${bitrateSliderValue}k`]);
-      } else { // VBR
-        encodingArgs.push(...["-q:a", qValue]);
-      }
-      return returnConversionData(inputFilename, encodingArgs, `${outputName}.ogg`);
-
+      result = handleVorbis(options, outputName);
+      break;
     case "WAV":
-      encodingArgs.push(...["-c:a", `pcm_s${wavBitDepth}le`]);
-      return returnConversionData(inputFilename, encodingArgs, `${outputName}.wav`);
+      result = handleWAV(options, outputName);
+      break;
   }
+
+  if (!result) return undefined;
+
+  const finalArgs = [...result.args];
+  if ("downmixToStereo" in options && options.downmixToStereo && !result.isCopyAudio) {
+    finalArgs.push("-ac", "2");
+  }
+
+  return {
+    ffmpegArgs: ["-i", inputFilename, ...finalArgs, result.outputFilename],
+    outputFilename: result.outputFilename,
+  };
 };
