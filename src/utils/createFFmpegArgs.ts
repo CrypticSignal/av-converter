@@ -33,17 +33,6 @@ export type EncodingOptions =
       downmixToStereo: boolean;
     }
   | {
-      codec: "H264";
-      crfValue: string;
-      transcodeVideo: boolean;
-      transcodeAudio: boolean;
-      videoBitrate: string;
-      videoContainer: string;
-      videoEncodingType: string;
-      x264Preset: string;
-      downmixToStereo: boolean;
-    }
-  | {
       codec: "MKA";
       downmixToStereo: boolean;
     }
@@ -126,28 +115,6 @@ const handleFLAC = (options: Extract<EncodingOptions, { codec: "FLAC" }>, output
   return { args, outputFilename: `${outputName}.${options.isKeepVideo ? "mkv" : "flac"}` };
 };
 
-const handleH264 = (options: Extract<EncodingOptions, { codec: "H264" }>, outputName: string): CodecHandlerResult => {
-  const outputFilename = `${outputName}.${options.videoContainer}`;
-  const args = ["-map", "0:V?", "-map", "0:a?", "-map", "0:s?"];
-
-  args.push(...(options.transcodeAudio ? ["-c:a", "aac", "-b:a", "256k"] : COPY_AUDIO_STREAM));
-
-  if (!options.transcodeVideo) {
-    args.push(...COPY_VIDEO_STREAM);
-    args.push(...(options.videoContainer === "mp4" ? ["-f", "mp4"] : ["-c:s", "copy", "-f", "matroska"]));
-    return { args, outputFilename, isCopyAudio: !options.transcodeAudio };
-  }
-
-  if (options.videoContainer === "mp4") {
-    args.push("-c:s", "mov_text");
-  }
-
-  args.push("-c:V", "libx264", "-preset", options.x264Preset);
-
-  args.push(...(options.videoEncodingType === "crf" ? ["-crf", options.crfValue] : ["-b:v", `${options.videoBitrate}M`]));
-  return { args, outputFilename, isCopyAudio: !options.transcodeAudio };
-};
-
 const handleMKA = (outputName: string): CodecHandlerResult => {
   return { args: ["-map", "0:a", ...COPY_AUDIO_STREAM], outputFilename: `${outputName}.mka`, isCopyAudio: true };
 };
@@ -214,9 +181,6 @@ export const createFFmpegArgs = (
       break;
     case "FLAC":
       result = handleFLAC(options, outputName);
-      break;
-    case "H264":
-      result = handleH264(options, outputName);
       break;
     case "MKA":
       result = handleMKA(outputName);

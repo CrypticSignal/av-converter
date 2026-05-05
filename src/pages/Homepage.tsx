@@ -16,7 +16,6 @@ import webAssemblyLogo from '../images/webassembly-25.png';
 import AC3 from '../components/AC3';
 import DTS from '../components/Dts';
 import FLAC from '../components/Flac';
-import H264 from '../components/H264';
 import MP3EncodingTypeSelector from '../components/MP3/EncodingTypeSelector';
 import NoSettingsApplicable from '../components/NoSettingsApplicable';
 import Opus from '../components/Opus';
@@ -46,14 +45,6 @@ const Homepage = (): JSX.Element => {
   const [flacCompression, setFlacCompression] = useState('5');
   // Keep the video?
   const [isKeepVideo, setIsKeepVideo] = useState(false);
-  // H.264/AVC
-  const [crfValue, setCrfValue] = useState('18');
-  const [transcodeAudio, setTranscodeAudio] = useState(true);
-  const [transcodeVideo, setTranscodeVideo] = useState(true);
-  const [videoBitrate, setVideoBitrate] = useState('8');
-  const [videoContainer, setVideoContainer] = useState('mp4');
-  const [videoEncodingType, setVideoEncodingType] = useState('crf');
-  const [x264Preset, setX264Preset] = useState('superfast');
   // MP3
   const [mp3EncodingType, setMp3EncodingType] = useState('cbr');
   const [mp3VbrSetting, setMp3VbrSetting] = useState('0');
@@ -97,28 +88,6 @@ const Homepage = (): JSX.Element => {
   // isKeepVideo
   const onIsKeepVideoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.currentTarget.value === 'yes' ? setIsKeepVideo(true) : setIsKeepVideo(false);
-  };
-  // H.264/AVC (MP4 or MKV container)
-  const onTranscodeVideoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.currentTarget.value === 'yes' ? setTranscodeVideo(true) : setTranscodeVideo(false);
-  };
-  const onCrfChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setCrfValue(e.currentTarget.value);
-  };
-  const onTranscodeAudioCheckboxChange = () => {
-    setTranscodeAudio(!transcodeAudio);
-  };
-  const onVideoContainerChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setVideoContainer(e.currentTarget.value);
-  };
-  const onVideoBitrateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setVideoBitrate(e.currentTarget.value);
-  };
-  const onVideoEncodingTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setVideoEncodingType(e.currentTarget.value);
-  };
-  const onX264PresetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setX264Preset(e.currentTarget.value);
   };
   // MP3
   const onMp3EncodingTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -187,19 +156,6 @@ const Homepage = (): JSX.Element => {
         break;
       case 'FLAC':
         options = { codec: 'FLAC', flacCompression, isKeepVideo, downmixToStereo };
-        break;
-      case 'H264':
-        options = {
-          codec: 'H264',
-          crfValue,
-          transcodeVideo,
-          transcodeAudio,
-          videoBitrate,
-          videoContainer,
-          videoEncodingType,
-          x264Preset,
-          downmixToStereo,
-        };
         break;
       case 'MKA':
         options = { codec: 'MKA', downmixToStereo };
@@ -307,25 +263,6 @@ const Homepage = (): JSX.Element => {
             />
             <IsKeepVideo onIsKeepVideoChange={onIsKeepVideoChange} isKeepVideo={isKeepVideo} />
           </div>
-        );
-      case 'H264':
-        return (
-          <H264
-            onVideoContainerChange={onVideoContainerChange}
-            onTranscodeVideoChange={onTranscodeVideoChange}
-            onCrfChange={onCrfChange}
-            crfValue={crfValue}
-            transcodeAudio={transcodeAudio}
-            onTranscodeAudioCheckboxChange={onTranscodeAudioCheckboxChange}
-            transcodeVideo={transcodeVideo}
-            videoContainer={videoContainer}
-            videoBitrate={videoBitrate}
-            onVideoBitrateChange={onVideoBitrateChange}
-            videoEncodingType={videoEncodingType}
-            onVideoEncodingTypeChange={onVideoEncodingTypeChange}
-            x264Preset={x264Preset}
-            onX264PresetChange={onX264PresetChange}
-          />
         );
       case 'Opus':
         return (

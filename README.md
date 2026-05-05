@@ -5,21 +5,26 @@
   <img src="https://img.shields.io/badge/FFmpeg-000000?style=for-the-badge&logo=ffmpeg&logoColor=green" alt="FFmpeg" />
   <img src="https://img.shields.io/badge/Docker-000000?style=for-the-badge&logo=docker&logoColor=0db7ed" alt="Docker" />
   <img src="https://img.shields.io/badge/Tailwind-black?style=for-the-badge&logo=tailwind-css&logoColor=38B2AC" alt="Tailwind">
+</div>
 
-  ![Screenshot of audio/video converter](screenshot.png)
+![](screenshot.png)
 
-  https://av-converter.com
-
-  Convert an audio or video file to AAC, AC3 (Dolby Digital), ALAC, DTS, FLAC, MP3, Opus, Vorbis or WAV.
-
-_Note: converting a video to one of the above formats will turn it into an audio-only file. You can also convert a video to MP4 or MKV._
+  Convert an audio file, or the audio streams in a video file, to one of the following formats:
+  - AAC
+  - AC3 (Dolby Digital)
+  - ALAC
+  - DTS
+  - FLAC
+  - MP3
+  - Opus
+  - Vorbis
+  - WAV
 
 ## Docker
-You can run this web app locally with a single command. Switch to the `docker/dev` directory, then run:
+You can run this web app in a Docker container with a single command. Switch to the `docker/dev` directory, then run:
 ```
 docker compose up --build --watch
 ```
 Access the web app at http://localhost:3001
 
 _Any changes you make in `/src` will be reflected without having to rebuild any containers. Simply refresh your web browser._
-</div>
