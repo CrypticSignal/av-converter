@@ -21,9 +21,9 @@
   - WAV
 
 ## Docker
-You can run this web app in a Docker container with a single command. Switch to the `docker/dev` directory, then run:
+You can run this web app in a Docker container with a single command.
 ```
-docker compose up --build --watch
+docker compose -f docker/dev/docker-compose.yml up --build --watch
 ```
 Access the web app at http://localhost:3001
 
