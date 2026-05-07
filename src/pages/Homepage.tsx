@@ -31,14 +31,13 @@ import Divider from '@mui/material/Divider';
 const Homepage = (): JSX.Element => {
   const [alertMessage, setAlertMessage] = useState('');
   const [alertSeverity, setAlertSeverity] = useState<AlertColor>('info');
+  const [codec, setCodec] = useState('MP3');
+  const [ffmpegCommand, setFfmpegCommand] = useState('');
   const [file, setFile] = useState<File | undefined>(undefined);
   const [inputFilename, setInputFilename] = useState('');
-  const [codec, setCodec] = useState('MP3');
-  // Conversion progress.
-  const [progress, setProgress] = useState(0);
   const [isConverting, setIsConverting] = useState(false);
-  const [ffmpegCommand, setFfmpegCommand] = useState('');
-
+  const [manualCommandInput, setManualCommandInput] = useState('');
+  const [manualMode, setManualMode] = useState(false);
   // AC3
   const [ac3Bitrate, setAc3Bitrate] = useState('640');
   // FLAC
@@ -57,6 +56,8 @@ const Homepage = (): JSX.Element => {
   const [wavBitDepth, setWavBitDepth] = useState('16');
   // Downmix to stereo?
   const [downmixToStereo, setDownmixToStereo] = useState(false);
+  // Conversion progress.
+  const [progress, setProgress] = useState(0);
 
   const onFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.currentTarget.files && e.currentTarget.files[0]) {
@@ -135,72 +136,102 @@ const Homepage = (): JSX.Element => {
     const outputNameElement = document.getElementById('output_name') as HTMLInputElement;
     const outputNameValue = outputNameElement ? outputNameElement.value : '';
 
+    let ffmpegArgs: string[];
+    let outputFilename = '';
 
-    let options: EncodingOptions;
+    if (manualMode) {
+      const restOfArgs = manualCommandInput.trim().split(' ');
+      // https://github.com/ffmpegwasm/ffmpeg.wasm/issues/597
+      if (restOfArgs.includes('-c:v') || restOfArgs.includes('-c:V')) {
+        if (!navigator.userAgent.toLowerCase().includes('firefox')) {
+          restOfArgs.splice(-1, 0, "-threads", "4");
+        }
+      }
 
-    switch (codec) {
-      case 'AAC':
-        options = { codec: 'AAC', bitrateSliderValue, isKeepVideo, downmixToStereo };
-        break;
-      case 'AC3':
-        options = { codec: 'AC3', ac3Bitrate, isKeepVideo, downmixToStereo };
-        break;
-      case 'ALAC':
-        options = { codec: 'ALAC', isKeepVideo, downmixToStereo };
-        break;
-      case 'CAF':
-        options = { codec: 'CAF', downmixToStereo };
-        break;
-      case 'DTS':
-        options = { codec: 'DTS', bitrateSliderValue, isKeepVideo, downmixToStereo };
-        break;
-      case 'FLAC':
-        options = { codec: 'FLAC', flacCompression, isKeepVideo, downmixToStereo };
-        break;
-      case 'MKA':
-        options = { codec: 'MKA', downmixToStereo };
-        break;
-      case 'MP3':
-        options = {
-          codec: 'MP3',
-          bitrateSliderValue,
-          isKeepVideo,
-          mp3EncodingType,
-          mp3VbrSetting,
-        };
-        break;
-      case 'Opus':
-        options = { codec: 'Opus', bitrateSliderValue, opusEncodingType, downmixToStereo };
-        break;
-      case 'Vorbis':
-        options = {
-          codec: 'Vorbis',
-          bitrateSliderValue,
-          qValue,
-          vorbisEncodingType,
-          downmixToStereo,
-        };
-        break;
-      case 'WAV':
-        options = { codec: 'WAV', wavBitDepth, downmixToStereo };
-        break;
-      default:
+      if (restOfArgs.length === 0) {
         setAlertSeverity('error');
-        setAlertMessage('Invalid codec selected.');
+        setAlertMessage('Please enter the rest of the command.');
         setIsConverting(false);
         return;
+      }
+
+      ffmpegArgs = ['-i', inputFilename, ...restOfArgs];
+      outputFilename = ffmpegArgs[ffmpegArgs.length - 1];
+      
+      if (!outputFilename) {
+        setAlertSeverity('error');
+        setAlertMessage('Could not parse output filename from command.');
+        setIsConverting(false);
+        return;
+      }
+    } else {
+      let options: EncodingOptions;
+
+      switch (codec) {
+        case 'AAC':
+          options = { codec: 'AAC', bitrateSliderValue, isKeepVideo, downmixToStereo };
+          break;
+        case 'AC3':
+          options = { codec: 'AC3', ac3Bitrate, isKeepVideo, downmixToStereo };
+          break;
+        case 'ALAC':
+          options = { codec: 'ALAC', isKeepVideo, downmixToStereo };
+          break;
+        case 'CAF':
+          options = { codec: 'CAF', downmixToStereo };
+          break;
+        case 'DTS':
+          options = { codec: 'DTS', bitrateSliderValue, isKeepVideo, downmixToStereo };
+          break;
+        case 'FLAC':
+          options = { codec: 'FLAC', flacCompression, isKeepVideo, downmixToStereo };
+          break;
+        case 'MKA':
+          options = { codec: 'MKA', downmixToStereo };
+          break;
+        case 'MP3':
+          options = {
+            codec: 'MP3',
+            bitrateSliderValue,
+            isKeepVideo,
+            mp3EncodingType,
+            mp3VbrSetting,
+          };
+          break;
+        case 'Opus':
+          options = { codec: 'Opus', bitrateSliderValue, opusEncodingType, downmixToStereo };
+          break;
+        case 'Vorbis':
+          options = {
+            codec: 'Vorbis',
+            bitrateSliderValue,
+            qValue,
+            vorbisEncodingType,
+            downmixToStereo,
+          };
+          break;
+        case 'WAV':
+          options = { codec: 'WAV', wavBitDepth, downmixToStereo };
+          break;
+        default:
+          setAlertSeverity('error');
+          setAlertMessage('Invalid codec selected.');
+          setIsConverting(false);
+          return;
+      }
+
+      const conversionData = createFFmpegArgs(inputFilename, options, outputNameValue);
+
+      if (conversionData === undefined) {
+        setIsConverting(false);
+        setAlertSeverity('error');
+        setAlertMessage('Failed to generate conversion settings. Check codec compatibility.');
+        return;
+      }
+
+      ffmpegArgs = conversionData.ffmpegArgs;
+      outputFilename = conversionData.outputFilename;
     }
-
-    const conversionData = createFFmpegArgs(inputFilename, options, outputNameValue);
-
-    if (conversionData === undefined) {
-      setIsConverting(false);
-      setAlertSeverity('error');
-      setAlertMessage('Failed to generate conversion settings. Check codec compatibility.');
-      return;
-    }
-
-    const { ffmpegArgs, outputFilename } = conversionData; 
 
     if (outputFilename === inputFilename) {
       setAlertSeverity('error');
@@ -210,8 +241,6 @@ const Homepage = (): JSX.Element => {
     }
 
     setFfmpegCommand(`ffmpeg ${ffmpegArgs.join(' ')}`);
-    console.log(ffmpegCommand);
-
     convertFile(ffmpeg, file, ffmpegArgs, inputFilename, outputFilename, setProgress, setAlertMessage, setAlertSeverity, setIsConverting);
   };
 
@@ -310,59 +339,99 @@ const Homepage = (): JSX.Element => {
       </Typography>
       <Divider sx={{ my: 2 }} />
 
-      <FormatSelector onCodecChange={onCodecChange} codec={codec} />
-      <Divider sx={{ my: 2 }} />
-
-      <Typography variant="h5" component="h2" gutterBottom>
-        Encoder Settings
-      </Typography>
-
-      {showFormatSettings()}
-      
-      <div className="my-4">
-        <Typography variant="subtitle1" component="h3" gutterBottom>
-          Downmix to stereo?
-        </Typography>
-        <label className="mr-4">
+      <div className="my-4 text-center">
+        <label className="inline-flex items-center cursor-pointer">
           <input
-            type="radio"
-            name="downmix"
-            value="yes"
-            checked={downmixToStereo}
-            onChange={onDownmixToStereoChange}
-            className="mr-1"
+            type="checkbox"
+            className="form-checkbox h-5 w-5 text-sky-600"
+            checked={manualMode}
+            onChange={(e) => setManualMode(e.target.checked)}
           />
-          Yes
-        </label>
-        <label>
-          <input
-            type="radio"
-            name="downmix"
-            value="no"
-            checked={!downmixToStereo}
-            onChange={onDownmixToStereoChange}
-            className="mr-1"
-          />
-          No
+          <span className="ml-2 text-black">Manual FFmpeg Command</span>
         </label>
       </div>
+
       <Divider sx={{ my: 2 }} />
 
-      <Typography variant="h5" component="h2" gutterBottom>
-        Output Filename
-      </Typography>
-      <input
-        type="text"
-        autoComplete="off"
-        className="mt-1 block w-full max-w-xs mx-auto px-3 py-2 bg-white border border-gray-300 rounded-md text-sm shadow-sm placeholder-gray-400 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 disabled:shadow-none invalid:border-pink-500 invalid:text-pink-600 focus:invalid:border-pink-500 focus:invalid:ring-pink-500"
-        maxLength={200}
-        id="output_name"
-        required
-      />
+      {manualMode ? (
+        <div className="my-4 w-full max-w-xl mx-auto">
+          <Typography variant="h5" component="h2" gutterBottom>
+            Enter FFmpeg Command
+          </Typography>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            Enter the rest of the command (e.g. <code>-c:v libx264 output.mp4</code>).
+          </Typography>
+          <div className="flex items-stretch mt-1">
+            <span
+              className="bg-gray-200 border border-gray-300 border-r-0 rounded-l-md px-3 py-2 text-sm text-gray-700 whitespace-nowrap overflow-hidden text-ellipsis shrink-0 max-w-[150px] sm:max-w-[250px]"
+              title={`ffmpeg -i "${inputFilename || 'input.mp4'}"`}
+            >
+              ffmpeg -i {inputFilename || 'input.mp4'}
+            </span>
+            <input
+              type="text"
+              className="flex-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-r-md text-sm shadow-sm placeholder-gray-400 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 text-black min-w-[100px]"
+              value={manualCommandInput}
+              onChange={(e) => setManualCommandInput(e.target.value)}
+              placeholder="-c:v libx264 output.mp4"
+            />
+          </div>
+        </div>
+      ) : (
+        <>
+          <FormatSelector onCodecChange={onCodecChange} codec={codec} />
+          <Divider sx={{ my: 2 }} />
+
+          <Typography variant="h5" component="h2" gutterBottom>
+            Encoder Settings
+          </Typography>
+
+          {showFormatSettings()}
+          
+          <div className="my-4">
+            <Typography variant="subtitle1" component="h3" gutterBottom>
+              Downmix to stereo?
+            </Typography>
+            <label className="mr-4">
+              <input
+                type="radio"
+                name="downmix"
+                value="yes"
+                checked={downmixToStereo}
+                onChange={onDownmixToStereoChange}
+                className="mr-1"
+              />
+              Yes
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="downmix"
+                value="no"
+                checked={!downmixToStereo}
+                onChange={onDownmixToStereoChange}
+                className="mr-1"
+              />
+              No
+            </label>
+          </div>
+          <Divider sx={{ my: 2 }} />
+
+          <Typography variant="h5" component="h2" gutterBottom>
+            Output Filename
+          </Typography>
+          <input
+            type="text"
+            autoComplete="off"
+            className="mt-1 block w-full max-w-xs mx-auto px-3 py-2 bg-white border border-gray-300 rounded-md text-sm shadow-sm placeholder-gray-400 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 disabled:shadow-none invalid:border-pink-500 invalid:text-pink-600 focus:invalid:border-pink-500 focus:invalid:ring-pink-500 text-black"
+            maxLength={200}
+            id="output_name"
+          />
+        </>
+      )}
 
       <div className={`text-center my-4 ${isConverting ? 'block' : 'hidden'}`}>
-        <div>Converting...</div>
-        {ffmpegCommand && <>Running {ffmpegCommand}...</>}
+        {ffmpegCommand && <>Running: {ffmpegCommand}...</>}
       </div>
 
       <div className={`my-4 w-full max-w-xs mx-auto ${isConverting && progress > 0 && progress < 100 ? 'block' : 'hidden'}`}>
