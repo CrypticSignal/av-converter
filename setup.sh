@@ -9,6 +9,13 @@ log() {
   echo
 }
 
+LOCAL_MODE=false
+for arg in "$@"; do
+  if [ "$arg" == "--local" ]; then
+    LOCAL_MODE=true
+  fi
+done
+
 # Update system packages safely
 log "Updating system packages..."
 apt-get update -y
@@ -44,15 +51,32 @@ else
   log "Docker already installed."
 fi
 
+log "Checking if Docker is running..."
+if docker info > /dev/null 2>&1; then
+  log "Docker is already running."
+else
+  log "Enabling and starting Docker service..."
+  if command -v systemctl &> /dev/null && systemctl list-unit-files | grep -q docker.service; then
+    systemctl enable --now docker
+  elif command -v service &> /dev/null && service docker status >/dev/null 2>&1; then
+    log "systemctl not found or docker.service missing, trying service command..."
+    service docker start
+  elif command -v snap &> /dev/null && snap list docker &> /dev/null; then
+    log "Docker installed via snap, starting snap.docker.dockerd..."
+    systemctl enable --now snap.docker.dockerd.service || snap start docker
+  else
+    log "Could not automatically start docker service. Starting dockerd in background as a fallback..."
+    dockerd > /dev/null 2>&1 &
+    sleep 3
+  fi
+fi
+
 log "Removing all stopped containers..."
-if [ "$(docker ps -aq | wc -l)" -gt 0 ]; then
+if [ "$(docker ps -aq 2>/dev/null | wc -l)" -gt 0 ]; then
   docker rm -f $(docker ps -aq)
 else
   log "No containers to remove."
 fi
-
-log "Enabling and starting Docker service..."
-systemctl enable --now docker
 
 # ------------------------------------------------------------------------------------------------------------------------------
 
@@ -68,16 +92,60 @@ yarn install
 
 # https://github.com/ffmpegwasm/ffmpeg.wasm/issues/619#issuecomment-2726185799
 log "Replacing node_modules/@ffmpeg/ffmpeg/dist/esm/worker.js..."
-cp ffmpeg_wasm/worker.js node_modules/@ffmpeg/ffmpeg/dist/esm/worker.js
+cp public/ffmpeg_wasm/worker.js node_modules/@ffmpeg/ffmpeg/dist/esm/worker.js
 
 log "Building the project..."
 yarn build
 
 cd docker/prod || exit 1
 
-# Initial nginx config
-log "Creating initial nginx configuration for certbot..."
-cat <<'EOL' > /home/projects/av-converter/docker/prod/nginx.conf
+# If running this script with --local
+if [ "$LOCAL_MODE" = true ]; then
+  log "Running in local mode. Skipping SSL and creating HTTP-only Nginx config..."
+  
+  cat <<'EOL' > nginx.conf
+events {}
+
+http {
+    include mime.types;
+    
+    server {
+        listen 80;
+        server_name localhost;
+
+        location /ffmpeg_wasm {
+            add_header 'Cross-Origin-Embedder-Policy' 'require-corp';
+            add_header 'Cross-Origin-Opener-Policy' 'same-origin';
+            alias /ffmpeg_wasm/;
+            try_files $uri =404;
+        }
+
+        location /game {
+            root /game;
+            try_files $uri /game.html;
+        }
+
+        location / {
+            add_header 'Cross-Origin-Embedder-Policy' 'require-corp';
+            add_header 'Cross-Origin-Opener-Policy' 'same-origin';
+            root /usr/share/nginx/html;
+            try_files $uri /index.html =404;
+
+            # Disable caching
+            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
+            expires off;
+        }
+    }
+}
+EOL
+
+  docker compose up --detach --build
+  docker compose restart nginx
+
+else
+  # Initial nginx config
+  log "Creating initial nginx configuration for certbot..."
+  cat <<'EOL' > nginx.conf
 events {}
 
 http {
@@ -87,22 +155,31 @@ http {
         listen 80;
         server_name av-converter.com;
 
-        location ~ /.well-known/acme-challenge/ {
+        location /.well-known/acme-challenge/ {
             root /var/www/certbot;
         }
     }
 }
 EOL
 
-log "Starting docker compose services in detached mode..."
-docker compose up --detach
+  log "Restarting Nginx to pick up initial config..."
+  docker compose up --detach
+  docker compose restart nginx
+  # Give Nginx time to fully start
+  sleep 3
 
-# Uncomment if new SSL certificate is needed
-# docker compose run --rm certbot certonly --force-renew --webroot --webroot-path /var/www/certbot/ --email hshafiq@hotmail.co.uk -d av-converter.com --agree-tos --no-eff-email
+  # Check if SSL certificates already exist
+  log "Checking for existing SSL certificate..."
+  if ! docker run --rm -v ssl_certificate:/etc/letsencrypt alpine ls /etc/letsencrypt/live/av-converter.com/fullchain.pem >/dev/null 2>&1; then
+    log "No SSL certificate found. Requesting new one from Let's Encrypt..."
+    docker compose run --rm certbot certonly --force-renew --webroot --webroot-path /var/www/certbot/ --email hshafiq@hotmail.co.uk -d av-converter.com --agree-tos --no-eff-email
+  else
+    log "SSL certificate already exists! Skipping Certbot generation."
+  fi
 
-# Final nginx config
-log "Creating final nginx configuration with SSL..."
-cat <<'EOL' > /home/projects/av-converter/docker/prod/nginx.conf
+  # Final nginx config
+  log "Creating final nginx configuration with SSL..."
+  cat <<'EOL' > nginx.conf
 events {}
 
 http {
@@ -130,7 +207,7 @@ http {
             try_files $uri =404;
         }
 
-        location ~ /.well-known/acme-challenge/ {
+        location /.well-known/acme-challenge/ {
             root /var/www/certbot;
         }
 
@@ -153,7 +230,8 @@ http {
 }
 EOL
 
-log "Restarting nginx container..."
-docker compose restart nginx
+  log "Restarting nginx container..."
+  docker compose restart nginx
+fi
 
 log "Setup complete."

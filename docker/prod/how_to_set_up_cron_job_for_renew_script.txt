@@ -1,0 +1,11 @@
+How to set up a cron job to run renew-cert.sh at 2:17am every day
+
+chmod +x docker/prod/renew-certs.sh
+
+/home/username/av-converter/docker/prod/renew-certs.sh
+
+crontab -e
+
+Add the following to the bottom of the file:
+
+17 2 * * * <full path to renew-cert.sh> >> /tmp/renew-cert.log 2>&1
