@@ -9,19 +9,31 @@ services:
         - action: sync
           path: ../../src
           target: /app/src
-          ignore:
-            - node_modules/
+
         - action: sync
           path: ../../public
           target: /app/public
+
         - action: sync
           path: ../../index.html
           target: /app/index.html
+
         - action: rebuild
           path: ../../package.json
+
         - action: rebuild
+          path: ../../yarn.lock
+
+        - action: sync+restart
           path: ../../vite.config.ts
-        - action: rebuild
+          target: /app/vite.config.ts
+
+        - action: sync+restart
           path: ../../tsconfig.json
+          target: /app/tsconfig.json
+          
+        - action: sync+restart
+          path: ../../tailwind.config.js
+          target: /app/tailwind.config.js
     ports:
       - 3001:3000
