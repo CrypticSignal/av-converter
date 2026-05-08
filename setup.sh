@@ -71,12 +71,6 @@ else
   fi
 fi
 
-log "Removing all stopped containers..."
-if [ "$(docker ps -aq 2>/dev/null | wc -l)" -gt 0 ]; then
-  docker rm -f $(docker ps -aq)
-else
-  log "No containers to remove."
-fi
 
 # ------------------------------------------------------------------------------------------------------------------------------
 
@@ -98,6 +92,9 @@ log "Building the project..."
 yarn build
 
 cd docker/prod || exit 1
+
+log "Stopping and removing any existing containers for this project..."
+docker compose down
 
 # If running this script with --local
 if [ "$LOCAL_MODE" = true ]; then
