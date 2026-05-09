@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+DOMAIN="av-converter.com"
+EMAIL="theaudiophile@outlook.com"
+
 log() {
   local green='\033[0;32m'
   local reset='\033[0m'
@@ -25,7 +28,7 @@ apt-get upgrade -y
 # Docker installation and setup:
 
 log "Installing prerequisites for Docker..."
-apt-get install -y ca-certificates curl gnupg lsb-release
+apt-get install -y ca-certificates curl gnupg lsb-release dnsutils
 
 log "Setting up Docker GPG keyring directory..."
 install -m 0755 -d /etc/apt/keyrings
@@ -74,7 +77,7 @@ fi
 
 # ------------------------------------------------------------------------------------------------------------------------------
 
-curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
 log "Installing Node.js..."
 apt-get install -y nodejs
 
@@ -118,8 +121,8 @@ http {
         }
 
         location /game {
-            root /game;
-            try_files $uri /game.html;
+            root /;
+            try_files $uri /game/game.html;
         }
 
         location / {
@@ -150,7 +153,7 @@ http {
     
     server {
         listen 80;
-        server_name av-converter.com;
+        server_name DOMAIN_PLACEHOLDER;
 
         location /.well-known/acme-challenge/ {
             root /var/www/certbot;
@@ -159,17 +162,37 @@ http {
 }
 EOL
 
+  sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" nginx.conf
+
   log "Restarting Nginx to pick up initial config..."
   docker compose up --detach
   docker compose restart nginx
+  log "Waiting 3 seconds to give Nginx time to fully start..."
   # Give Nginx time to fully start
   sleep 3
 
   # Check if SSL certificates already exist
   log "Checking for existing SSL certificate..."
-  if ! docker run --rm -v ssl_certificate:/etc/letsencrypt alpine ls /etc/letsencrypt/live/av-converter.com/fullchain.pem >/dev/null 2>&1; then
-    log "No SSL certificate found. Requesting new one from Let's Encrypt..."
-    docker compose run --rm certbot certonly --force-renew --webroot --webroot-path /var/www/certbot/ --email hshafiq@hotmail.co.uk -d av-converter.com --agree-tos --no-eff-email
+  if ! docker compose run --rm --entrypoint sh certbot -c "ls /etc/letsencrypt/live/$DOMAIN/fullchain.pem" >/dev/null 2>&1; then
+    log "No SSL certificate found."
+    
+    # Check DNS resolution before attempting certbot
+    log "Checking if $DOMAIN resolves to this server..."
+    RESOLVED_IP=$(dig +short "$DOMAIN" A | tail -1)
+    if [ -z "$RESOLVED_IP" ]; then
+      log "ERROR: $DOMAIN does not resolve to any IP address."
+      log "Please ensure your domain's DNS A record points to this server's IP address."
+      exit 1
+    fi
+    
+    log "Domain resolves to: $RESOLVED_IP"
+    log "Requesting new SSL certificate from Let's Encrypt..."
+    if docker compose run --rm certbot certonly --webroot --webroot-path /var/www/certbot/ --email "$EMAIL" -d "$DOMAIN" --agree-tos --no-eff-email; then
+      log "SSL certificate created successfully!"
+    else
+      log "ERROR: Failed to obtain SSL certificate. Check DNS and firewall settings."
+      exit 1
+    fi
   else
     log "SSL certificate already exists! Skipping Certbot generation."
   fi
@@ -184,7 +207,7 @@ http {
     
     server {
         listen 80;
-        server_name av-converter.com;
+        server_name DOMAIN_PLACEHOLDER;
 
         location / {
             return 301 https://$host$request_uri;
@@ -193,9 +216,9 @@ http {
 
     server {
         listen 443 ssl;
-        server_name av-converter.com;
-        ssl_certificate     /etc/letsencrypt/live/av-converter.com/fullchain.pem;
-        ssl_certificate_key /etc/letsencrypt/live/av-converter.com/privkey.pem;
+        server_name DOMAIN_PLACEHOLDER;
+        ssl_certificate     /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/privkey.pem;
 
         location /ffmpeg_wasm {
             add_header 'Cross-Origin-Embedder-Policy' 'require-corp';
@@ -209,8 +232,8 @@ http {
         }
 
         location /game {
-            root /game;
-            try_files $uri /game.html;
+            root /;
+            try_files $uri /game/game.html;
         }
 
         location / {
@@ -226,6 +249,8 @@ http {
     }
 }
 EOL
+
+  sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" nginx.conf
 
   log "Restarting nginx container..."
   docker compose restart nginx
