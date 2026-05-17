@@ -13,6 +13,10 @@ services:
       - ../../build:/usr/share/nginx/html:ro
       - ../../public/game:/game:ro
       - ../../public/ffmpeg_wasm:/ffmpeg_wasm
+    depends_on:
+      - logging
+      - grafana
+
   certbot:
     container_name: certbot
     image: certbot/certbot:latest
@@ -20,6 +24,36 @@ services:
       - certbot_webroot_path:/var/www/certbot:rw   
       - ssl_certificate:/etc/letsencrypt:rw 
 
+  logging:
+    container_name: logging
+    build:
+      context: ../../logging
+    restart: unless-stopped
+    depends_on:
+      - loki
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki_data:/tmp/loki
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      - GF_SERVER_ROOT_URL=https://av-converter.com/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - loki
+
 volumes:
   certbot_webroot_path:
   ssl_certificate:
+  loki_data:
+  grafana_data:

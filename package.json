@@ -20,7 +20,12 @@
     "deploy": "yarn install && yarn build",
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy-all": "yarn build && docker compose -f docker/prod/docker-compose.yml up -d --build --remove-orphans && docker compose -f docker/prod/docker-compose.yml exec --no-tty nginx nginx -s reload",
+    "deploy-src": "yarn build",
+    "docker-down": "docker compose -f docker/prod/docker-compose.yml down",
+    "docker-logs": "docker compose -f docker/prod/docker-compose.yml logs -f",
+    "docker-dev": "docker compose -f docker/dev/docker-compose.yml up --build --watch"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.7",

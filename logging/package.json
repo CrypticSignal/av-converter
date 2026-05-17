@@ -1,0 +1,15 @@
+{
+  "name": "logging",
+  "version": "1.0.0",
+  "license": "MIT", 
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  }
+}
