@@ -319,42 +319,48 @@ const Homepage = (): JSX.Element => {
   };
 
   return (
-    <>
-        <div className="bg-black text-white text-center">
-            <h1 className="text-4xl font-sans mt-0 mb-0 pt-5 pb-1">Audio / Video Converter</h1>
-            <div className="text-sm mb-5 flex items-center justify-center">
-                <i className="mr-1">Powered by FFmpeg</i>
-                <a href="https://ffmpeg.org/" target="_blank" rel="noreferrer" className="inline-block align-middle mr-1">
-                <img src={ffmpegLogo} alt="ffmpeg logo" className="h-6 w-6" />
-                </a>
-                <i className="mr-1">and WebAssembly</i>
-                <a href="https://webassembly.org/" target="_blank" rel="noreferrer" className="inline-block align-middle">
-                <img src={webAssemblyLogo} alt="web assembly logo" className="h-6 w-6" />
-                </a>
-            </div>
+    <div className="glass-card px-4 py-6 sm:px-7 sm:py-8 text-center">
+      <div className="mb-5">
+        <h1 className="text-3xl sm:text-4xl mt-0 mb-2 font-extrabold tracking-tight text-slate-900">
+          Audio / Video Converter
+        </h1>
+        <div className="text-sm text-slate-600 flex items-center justify-center flex-wrap gap-1">
+          <i>Powered by FFmpeg</i>
+          <a href="https://ffmpeg.org/" target="_blank" rel="noreferrer" className="inline-block align-middle">
+            <img src={ffmpegLogo} alt="ffmpeg logo" className="h-6 w-6" />
+          </a>
+          <i>and WebAssembly</i>
+          <a href="https://webassembly.org/" target="_blank" rel="noreferrer" className="inline-block align-middle">
+            <img src={webAssemblyLogo} alt="web assembly logo" className="h-6 w-6" />
+          </a>
         </div>
-      <FileInput onFileInput={onFileInput} filename={inputFilename} />
-      <Typography variant="caption" display="block">
-        Max Filesize: 2 GB
-      </Typography>
-      <Divider sx={{ my: 2 }} />
+      </div>
+
+      <div className="rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-5 sm:px-5">
+        <FileInput onFileInput={onFileInput} filename={inputFilename} />
+        <Typography variant="caption" display="block" sx={{ color: '#475569', mt: 0.5 }}>
+          Max filesize: 2 GB
+        </Typography>
+      </div>
+
+      <Divider sx={{ my: 3 }} />
 
       <div className="my-4 text-center">
-        <label className="inline-flex items-center cursor-pointer">
+        <label className="inline-flex items-center cursor-pointer text-slate-800 font-medium">
           <input
             type="checkbox"
-            className="form-checkbox h-5 w-5 text-sky-600"
+            className="form-checkbox h-5 w-5 accent-sky-600"
             checked={manualMode}
             onChange={(e) => setManualMode(e.target.checked)}
           />
-          <span className="ml-2 text-black">Manual FFmpeg Command</span>
+          <span className="ml-2">Manual FFmpeg Command</span>
         </label>
       </div>
 
       <Divider sx={{ my: 2 }} />
 
       {manualMode ? (
-        <div className="my-4 w-full max-w-xl mx-auto">
+        <div className="my-4 w-full max-w-xl mx-auto rounded-2xl border border-slate-200 bg-white/75 p-4">
           <Typography variant="h5" component="h2" gutterBottom>
             Enter FFmpeg Command
           </Typography>
@@ -370,7 +376,7 @@ const Homepage = (): JSX.Element => {
             </span>
             <input
               type="text"
-              className="flex-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-r-md text-sm shadow-sm placeholder-gray-400 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 text-black min-w-[100px]"
+              className="flex-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-r-md text-sm shadow-sm placeholder-gray-400 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 text-slate-900 min-w-[100px]"
               value={manualCommandInput}
               onChange={(e) => setManualCommandInput(e.target.value)}
               placeholder="-c:v libx264 output.mp4"
@@ -382,13 +388,13 @@ const Homepage = (): JSX.Element => {
           <FormatSelector onCodecChange={onCodecChange} codec={codec} />
           <Divider sx={{ my: 2 }} />
 
-          <Typography variant="h5" component="h2" gutterBottom>
+          <Typography variant="h5" component="h2" gutterBottom sx={{ color: '#0f172a', fontWeight: 700 }}>
             Encoder Settings
           </Typography>
 
           {showFormatSettings()}
           
-          <div className="my-4">
+          <div className="my-4 text-slate-800">
             <Typography variant="subtitle1" component="h3" gutterBottom>
               Downmix to stereo?
             </Typography>
@@ -417,13 +423,13 @@ const Homepage = (): JSX.Element => {
           </div>
           <Divider sx={{ my: 2 }} />
 
-          <Typography variant="h5" component="h2" gutterBottom>
+          <Typography variant="h5" component="h2" gutterBottom sx={{ color: '#0f172a', fontWeight: 700 }}>
             Output Filename
           </Typography>
           <input
             type="text"
             autoComplete="off"
-            className="mt-1 block w-full max-w-xs mx-auto px-3 py-2 bg-white border border-gray-300 rounded-md text-sm shadow-sm placeholder-gray-400 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 disabled:shadow-none invalid:border-pink-500 invalid:text-pink-600 focus:invalid:border-pink-500 focus:invalid:ring-pink-500 text-black"
+            className="mt-1 block w-full max-w-xs mx-auto px-3 py-2 bg-white border border-slate-300 rounded-xl text-sm shadow-sm placeholder-gray-400 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 disabled:shadow-none invalid:border-pink-500 invalid:text-pink-600 focus:invalid:border-pink-500 focus:invalid:ring-pink-500 text-slate-900"
             maxLength={200}
             id="output_name"
           />
@@ -450,7 +456,7 @@ const Homepage = (): JSX.Element => {
       <div className={`mt-4 ${!isConverting ? 'block' : 'hidden'}`}>
         <ConvertButton onConvertClicked={onConvertClicked} />
       </div>
-    </>
+    </div>
   );
 };
 

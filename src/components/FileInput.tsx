@@ -26,7 +26,15 @@ const FileInput: React.FC<FileInputProps> = ({ onFileInput, filename }) => {
       role={undefined}
       variant="contained"
       tabIndex={-1}
-      sx={{ marginBottom: "0.25rem" }}
+      sx={{
+        marginBottom: "0.25rem",
+        borderRadius: "0.8rem",
+        paddingX: "1rem",
+        paddingY: "0.6rem",
+        textTransform: "none",
+        fontWeight: 700,
+        background: "linear-gradient(135deg, #0284c7, #0f766e)",
+      }}
     >
       {filename || "Select file"}
       <VisuallyHiddenInput

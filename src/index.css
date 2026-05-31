@@ -1,1 +1,64 @@
 @import "tailwindcss";
+
+:root {
+  --bg-deep: #0b1220;
+  --bg-mid: #17223b;
+  --card: rgba(255, 255, 255, 0.86);
+  --card-border: rgba(255, 255, 255, 0.32);
+  --text-main: #0f172a;
+  --text-soft: #475569;
+  --accent: #ea580c;
+  --accent-2: #0284c7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Plus Jakarta Sans", "Manrope", "Segoe UI", sans-serif;
+  color: var(--text-main);
+  background:
+    radial-gradient(circle at 8% 10%, #334155 0%, transparent 32%),
+    radial-gradient(circle at 85% 18%, #0ea5e9 0%, transparent 28%),
+    linear-gradient(135deg, var(--bg-deep), var(--bg-mid));
+  background-attachment: fixed;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.content-wrap {
+  width: min(920px, calc(100vw - 1.5rem));
+  margin: 1rem auto 2rem;
+}
+
+.glass-card {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 1.2rem;
+  box-shadow: 0 20px 60px rgba(2, 6, 23, 0.35);
+  backdrop-filter: blur(8px);
+}
+
+.fade-up {
+  animation: fadeUp 420ms ease-out both;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

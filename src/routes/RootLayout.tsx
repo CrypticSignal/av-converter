@@ -5,14 +5,16 @@ import { Container } from '@mui/material';
 
 const RootLayout: React.FC = () => {
   return (
-    <>
+    <div className="app-shell">
       <Navbar />
-      <main className="text-center">
+      <main>
         <Container maxWidth={false} disableGutters>
-          <Outlet />
+          <div className="content-wrap fade-up">
+            <Outlet />
+          </div>
         </Container>
       </main>
-    </>
+    </div>
   );
 };
 

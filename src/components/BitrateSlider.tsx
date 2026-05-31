@@ -28,7 +28,7 @@ const BitrateSlider: React.FC<BitrateSliderProps> = ({ initialValue, min, max, s
   const backgroundPercentage = getBackgroundSize();
 
   const sliderStyle = {
-    background: `linear-gradient(to right, #2563eb ${backgroundPercentage}%, #d1d5db ${backgroundPercentage}%)`,
+    background: `linear-gradient(to right, #0284c7 ${backgroundPercentage}%, #cbd5e1 ${backgroundPercentage}%)`,
   };
 
   return (
@@ -45,7 +45,7 @@ const BitrateSlider: React.FC<BitrateSliderProps> = ({ initialValue, min, max, s
           onChange={(e) => dispatch(change(e.target.value))}
           style={sliderStyle}
         />
-        <span className="ml-4 text-sm text-gray-700 whitespace-nowrap">{` ${currentValue} kbps`}</span>
+        <span className="ml-4 text-sm text-slate-700 whitespace-nowrap">{` ${currentValue} kbps`}</span>
       </div>
     </div>
   );
