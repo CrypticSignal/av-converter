@@ -5,9 +5,20 @@
   <img src="https://img.shields.io/badge/FFmpeg-000000?style=for-the-badge&logo=ffmpeg&logoColor=green" alt="FFmpeg" />
   <img src="https://img.shields.io/badge/Docker-000000?style=for-the-badge&logo=docker&logoColor=0db7ed" alt="Docker" />
   <img src="https://img.shields.io/badge/Tailwind-black?style=for-the-badge&logo=tailwind-css&logoColor=38B2AC" alt="Tailwind">
+
+  ![](screenshot.png)
 </div>
 
-![](screenshot.png)
+## Table of contents
+
+- [Audio/video converter](#audiovideo-converter)
+- [Video Downloader](#video-downloader)
+- [Development](#development)
+  - [Docker](#docker)
+  - [Without Docker](#without-docker)
+- [Testing](#testing)
+
+## Audio/video converter
 
   Convert an audio file, or the audio streams in a video file, to one of the following formats:
   - AAC
@@ -20,11 +31,60 @@
   - Vorbis
   - WAV
 
-## Docker
-You can run this web app in a Docker container with a single command.
-```
+## Video Downloader
+
+Click on **Video Downloader** in the navigation bar (or visit `/download`). This is essentially a [yt-dlp](https://github.com/yt-dlp/yt-dlp) wrapper.
+
+## Development
+
+### Docker
+
+Run the frontend and downloader with:
+
+```sh
 docker compose -f docker/dev/docker-compose.yml up --build --watch
 ```
-Access the web app at http://localhost:3001
 
-_Any changes you make in `/src` will be reflected without having to rebuild any containers. Simply refresh your web browser._
+Access the web app at http://localhost:3000.
+
+While watch mode is running:
+
+- Changes in `src/`, `public/`, and `index.html` sync automatically without
+  rebuilding containers. Vite usually updates the page automatically; refresh if needed.
+- Changes to `vite.config.ts`, `tsconfig.json`, or `tailwind.config.js` sync and
+  restart the frontend container without rebuilding it.
+- Changes to `package.json` or `yarn.lock` automatically rebuild the frontend container.
+- Changes to `downloader/server.py`, `downloader/requirements.txt`, or
+  `downloader/Dockerfile` automatically rebuild and restart the downloader container.
+  This interrupts active downloads and recordings.
+- Changes to the Compose configuration require stopping and rerunning the command.
+
+These watch rules apply to development only; production changes require deployment.
+
+### Without Docker
+
+Install Python 3.12+, FFmpeg, and a current Node.js (22+) on your PATH, then run:
+
+```sh
+python -m pip install -r downloader/requirements.txt
+python downloader/server.py
+```
+
+In another terminal, install the frontend dependencies and start Vite:
+
+```sh
+yarn install
+yarn dev
+```
+
+Visit http://localhost:3000/download. Vite proxies API requests to
+http://127.0.0.1:8000. Set `DOWNLOADER_URL` to override that address. Use the Vite
+development server or production Nginx, not the static preview server, for downloads.
+
+## Testing
+
+Run backend tests (mocked downloads, no external network required):
+
+```sh
+python -m unittest discover -s downloader -p "test_*.py"
+```

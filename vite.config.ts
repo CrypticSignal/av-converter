@@ -21,6 +21,14 @@ export default defineConfig({
     }
   ],
   server: {
+    proxy: {
+      '/api/': {
+        target: process.env.DOWNLOADER_URL || 'http://127.0.0.1:8000',
+        // No development proxy timeout while yt-dlp downloads or records a live source.
+        timeout: 0,
+        proxyTimeout: 0,
+      },
+    },
     port: 3000,
     host: true,
     headers: {

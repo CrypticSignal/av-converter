@@ -1,10 +1,13 @@
 import gitHubLogo from "../images/GitHub-Mark-Light-32px.png";
+import { Link } from 'react-router-dom';
 
 const Navbar = () => {
   return (
     <nav className="bg-black text-white">
       <div className="flex items-center justify-between p-2.5">
         <div className="flex items-center">
+          <Link to="/" className="px-3 py-2 rounded-md hover:bg-green-300 hover:text-black">Converter</Link>
+          <Link to="/download" className="px-3 py-2 rounded-md hover:bg-green-300 hover:text-black">Video Downloader</Link>
           <a
             href="/game"
             className="text-white text-center hover:bg-green-300 hover:text-black px-3 py-2 rounded-md"

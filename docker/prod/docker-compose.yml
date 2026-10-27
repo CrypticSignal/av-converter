@@ -1,4 +1,8 @@
 services:
+  downloader:
+    build: ../../downloader
+    init: true
+    restart: unless-stopped
   nginx:
     container_name: nginx
     image: nginx:latest
@@ -14,6 +18,7 @@ services:
       - ../../public/game:/game:ro
       - ../../public/ffmpeg_wasm:/ffmpeg_wasm
     depends_on:
+      - downloader
       - logging
       - grafana
 

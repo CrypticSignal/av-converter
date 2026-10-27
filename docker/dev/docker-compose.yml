@@ -1,5 +1,21 @@
 services:
+  downloader:
+    build: ../../downloader
+    init: true
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: rebuild
+          path: ../../downloader/server.py
+        - action: rebuild
+          path: ../../downloader/requirements.txt
+        - action: rebuild
+          path: ../../downloader/Dockerfile
   frontend:
+    environment:
+      DOWNLOADER_URL: http://downloader:8000
+    depends_on:
+      - downloader
     container_name: app
     build:
       context: ../../
@@ -36,4 +52,4 @@ services:
           path: ../../tailwind.config.js
           target: /app/tailwind.config.js
     ports:
-      - 3001:3000
+      - 3000:3000
