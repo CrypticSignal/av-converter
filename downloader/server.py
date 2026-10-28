@@ -1,4 +1,5 @@
 """Request-based yt-dlp downloads. Files exist only for the current request."""
+import ipaddress
 import json
 import logging
 import mimetypes
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -72,11 +74,86 @@ class DownloadFiles:
 DOWNLOAD_FILES = DownloadFiles()
 
 
+class StorageGuard:
+    """Account for every file in the dedicated root, including retained links."""
+
+    def __init__(self):
+        self.root = Path(os.environ.get('DOWNLOAD_STORAGE_DIR',
+                         str(Path(tempfile.gettempdir()) / 'av-downloader')))
+        self.quota = int(os.environ.get('DOWNLOAD_STORAGE_QUOTA_BYTES', 10 * 1024**3))
+        self.min_free = int(os.environ.get('DOWNLOAD_MIN_FREE_BYTES', 1024**3))
+        self.interval = float(os.environ.get('DOWNLOAD_STORAGE_CHECK_SECONDS', '1'))
+        if self.quota <= 0 or self.min_free < 0 or not 0 < self.interval <= 60:
+            raise ValueError('Invalid downloader storage limits.')
+
+    def check(self):
+        self.root.mkdir(parents=True, exist_ok=True)
+        used = 0
+        for path in self.root.rglob('*'):
+            try:
+                if path.is_file():
+                    used += path.stat().st_size
+            except FileNotFoundError:
+                pass  # Another request may have just cleaned up its files.
+        if used >= self.quota:
+            raise DownloadError('Downloader storage quota reached. Please try again later.')
+        if shutil.disk_usage(self.root).free < self.min_free:
+            raise DownloadError('Downloader disk space is low. Please try again later.')
+
+
+class RateLimiter:
+    """Bounded, fixed-window admission rate; active recordings never expire."""
+
+    def __init__(self):
+        self.limit = int(os.environ.get('DOWNLOAD_RATE_LIMIT', '10'))
+        self.window = float(os.environ.get('DOWNLOAD_RATE_WINDOW_SECONDS', '60'))
+        self.max_clients = 10000
+        if self.limit <= 0 or self.window <= 0:
+            raise ValueError('Invalid downloader rate limits.')
+        self.clients = {}
+        self.lock = threading.Lock()
+
+    def allow(self, client):
+        now = time.monotonic()
+        with self.lock:
+            self.clients = {key: value for key, value in self.clients.items()
+                            if now - value[0] < self.window}
+            start, count = self.clients.get(client, (now, 0))
+            if count >= self.limit or (client not in self.clients
+                                      and len(self.clients) >= self.max_clients):
+                return False
+            self.clients[client] = (start, count + 1)
+            return True
+
+
+STORAGE = StorageGuard()
+RATE_LIMITER = RateLimiter()
+TRUSTED_PROXY_NETWORKS = tuple(ipaddress.ip_network(value.strip()) for value in
+                               os.environ.get('DOWNLOAD_TRUSTED_PROXIES', '').split(',')
+                               if value.strip())
+
+
+def client_identity(peer, forwarded):
+    """Walk the chain right-to-left, stopping at the first untrusted hop."""
+    address = ipaddress.ip_address(peer)
+    if not any(address in network for network in TRUSTED_PROXY_NETWORKS):
+        return str(address)
+    try:
+        chain = [ipaddress.ip_address(value.strip()) for value in forwarded.split(',')]
+    except ValueError:
+        return str(address)
+    for hop in reversed(chain):
+        if not any(address in network for network in TRUSTED_PROXY_NETWORKS):
+            break
+        address = hop
+    return str(address)
+
+
 def stop_process(process):
     """Stop yt-dlp and its FFmpeg children if streaming to the client fails."""
-    if process.poll() is not None:
-        return
     if os.name == 'nt':
+        if process.poll() is not None:
+            return
         subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
@@ -108,6 +185,7 @@ def download_video(url, download_type, directory, on_output):
     Output is streamed through on_output rather than stored in memory.
     Media downloads have no overall timeout; live recordings end with the source.
     """
+    STORAGE.check()
     args = YTDLP_ARGS.copy()
     if COOKIES_FILE.is_file():
         # yt-dlp may update cookies. Keep the source read-only and isolate writers.
@@ -134,6 +212,7 @@ def download_video(url, download_type, directory, on_output):
     if info.get('_type') in ('playlist', 'multi_video') or 'entries' in info:
         raise DownloadError('Playlists are not supported. Paste a video URL.')
 
+    STORAGE.check()
     manifest = directory / 'result.txt'
     process = subprocess.Popen(
         args + DOWNLOAD_TYPES[download_type] + [
@@ -142,12 +221,35 @@ def download_video(url, download_type, directory, on_output):
             '--print-to-file', 'after_move:filepath', str(manifest), '--', url],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         encoding='utf-8', errors='replace', bufsize=1, start_new_session=os.name != 'nt')
+    finished = threading.Event()
+    failures = []
+
+    def monitor_storage():
+        while not finished.wait(STORAGE.interval):
+            try:
+                STORAGE.check()
+            except Exception as exc:
+                failures.append(exc if isinstance(exc, DownloadError) else
+                                DownloadError('Unable to verify downloader storage safety.'))
+                stop_process(process)
+                return
+
+    monitor = threading.Thread(target=monitor_storage, daemon=True)
+    monitor.start()
     try:
         while line := process.stdout.readline(16384):
             on_output(line.rstrip())
-        if process.wait():
+        result = process.wait()
+        finished.set()
+        monitor.join()
+        if failures:
+            raise failures[0]
+        STORAGE.check()
+        if result:
             raise DownloadError('yt-dlp could not complete the download. See its output above for details.')
     finally:
+        finished.set()
+        monitor.join()
         stop_process(process)
         process.stdout.close()
     if not manifest.is_file():
@@ -207,6 +309,10 @@ class DownloadHandler(BaseHTTPRequestHandler):
         if self.path != '/api/download':
             self.error(404, 'Not found.')
             return
+        if not RATE_LIMITER.allow(client_identity(self.client_address[0],
+                                                  self.headers.get('X-Forwarded-For', ''))):
+            self.error(429, 'Too many download requests. Please try again later.')
+            return
         if self.headers.get_content_type() != 'application/x-www-form-urlencoded':
             self.error(415, 'Submit the form on the download page.')
             return
@@ -230,7 +336,8 @@ class DownloadHandler(BaseHTTPRequestHandler):
         token = None
         response_started = False
         try:
-            temporary = tempfile.TemporaryDirectory(prefix='av-download-')
+            STORAGE.check()
+            temporary = tempfile.TemporaryDirectory(prefix='av-download-', dir=STORAGE.root)
             response_started = True
             self.send_response(200)
             self.send_header('Content-Type', 'application/x-ndjson')
@@ -243,6 +350,7 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 self.event('log', message=line)
 
             output = download_video(url, download_type, Path(temporary.name), on_output)
+            STORAGE.check()
             token = DOWNLOAD_FILES.add(temporary, output)
             self.event('ready', url=f'/api/download/{token}', filename=output.name)
         except (BrokenPipeError, ConnectionResetError):
@@ -258,7 +366,7 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 if response_started:
                     self.event('error', message=message)
                 else:
-                    self.error(500, message)
+                    self.error(507 if isinstance(exc, DownloadError) else 500, message)
             except (BrokenPipeError, ConnectionResetError):
                 pass
         finally:

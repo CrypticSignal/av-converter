@@ -65,6 +65,47 @@ changing the original or sharing writes between requests. The copy is cleaned up
 with the download; replace the source export when its session expires. Outside
 the production Docker setup, requests without a cookie file continue anonymously.
 
+### Downloader resource protection
+
+The backend limits concurrent extractions to two and rate-limits new download
+requests per client (HTTP 429). Live recordings have **no overall duration
+limit**: admission rate limits do not interrupt existing recordings. Storage
+limits can stop any extraction, recording, or postprocessing operation.
+
+Environment settings (byte values are integers):
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `DOWNLOAD_STORAGE_DIR` | OS temporary directory + `av-downloader` | Dedicated root for active, partial, retained completed, and transferring files |
+| `DOWNLOAD_STORAGE_QUOTA_BYTES` | `10737418240` (10 GiB) | Total logical file bytes across the entire root; must be positive |
+| `DOWNLOAD_MIN_FREE_BYTES` | `1073741824` (1 GiB) | Minimum filesystem free bytes; zero disables this reserve |
+| `DOWNLOAD_STORAGE_CHECK_SECONDS` | `1` | Watchdog interval, greater than zero and at most 60 seconds |
+| `DOWNLOAD_RATE_LIMIT` | `10` | Maximum POST attempts per client per fixed window |
+| `DOWNLOAD_RATE_WINDOW_SECONDS` | `60` | Positive admission window in seconds |
+| `DOWNLOAD_TRUSTED_PROXIES` | empty | Comma-separated trusted IPv4/IPv6 proxy CIDRs; otherwise forwarding headers are ignored |
+
+Storage is checked before admission, before media extraction, periodically while
+the media subprocess runs (even without output), and before issuing a file link.
+A breach terminates the media process group including FFmpeg and removes the
+failed request's files. Admission storage failures return HTTP 507; failures after
+streaming starts use the existing error event. Completed files awaiting their
+one-use link (up to ten minutes) and files currently transferring still count.
+Retained files are not evicted to admit new work. Scanning failures fail closed.
+These are polling safeguards, not a filesystem hard quota: writes can overshoot
+between checks. Use a dedicated filesystem/container storage quota for a strict
+ceiling, and run only one backend process per storage root/rate-limit policy.
+
+Production Compose caps the downloader at two CPUs and 2 GiB memory. It uses a
+dedicated proxy network with Nginx at `172.30.50.2`, trusts only that address,
+and does not publish the backend port. Nginx replaces incoming forwarding headers
+with the actual peer address; the backend walks trusted hops right-to-left.
+If that subnet conflicts with your host network, change both the Compose network
+and trusted CIDR together. Do not trust arbitrary private networks. A deployment
+behind another load balancer must explicitly configure Nginx's trusted real-IP
+sources before forwarding its resolved client address. Direct/non-Docker setups
+trust no proxies by default. The client map is capped at 10,000 unexpired entries;
+new identities are rejected when full. State is in-memory and resets on restart.
+
 ## Development
 
 ### Docker

@@ -1,4 +1,5 @@
 import http.client
+import ipaddress
 from io import StringIO
 import json
 from pathlib import Path
@@ -11,11 +12,23 @@ from unittest.mock import Mock, patch
 from urllib.parse import unquote, urlencode
 
 from server import (DOWNLOAD_FILES, DOWNLOAD_SLOTS, DownloadFiles, DownloadHandler,
-                    ThreadingHTTPServer, validate_url)
+                    ThreadingHTTPServer, validate_url, StorageGuard, RateLimiter,
+                    client_identity, download_video, DownloadError)
 
 
 class DownloadTests(unittest.TestCase):
     def setUp(self):
+        rate_patch = patch('server.RATE_LIMITER', RateLimiter())
+        rate_patch.start()
+        self.addCleanup(rate_patch.stop)
+        storage_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(storage_directory.cleanup)
+        guard = StorageGuard()
+        guard.root = Path(storage_directory.name)
+        guard.min_free = 0
+        storage_patch = patch('server.STORAGE', guard)
+        storage_patch.start()
+        self.addCleanup(storage_patch.stop)
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), DownloadHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -277,6 +290,26 @@ class DownloadTests(unittest.TestCase):
             DOWNLOAD_SLOTS.release()
             DOWNLOAD_SLOTS.release()
 
+    def test_rate_limit_rejects_before_extraction(self):
+        limiter = RateLimiter()
+        limiter.limit = 1
+        with patch('server.RATE_LIMITER', limiter), patch('server.download_video') as download:
+            self.assertEqual(self.request({'url': 'invalid'})[0], 400)
+            self.assertEqual(self.request()[0], 429)
+            download.assert_not_called()
+
+    def test_storage_admission_releases_slot(self):
+        with patch('server.STORAGE.check', side_effect=DownloadError('storage quota reached')), \
+                patch('server.download_video') as download, self.assertLogs('server'):
+            status, _, body = self.request()
+            self.assertEqual(status, 507)
+            self.assertIn(b'quota', body)
+            download.assert_not_called()
+        self.assertTrue(DOWNLOAD_SLOTS.acquire(blocking=False))
+        self.assertTrue(DOWNLOAD_SLOTS.acquire(blocking=False))
+        DOWNLOAD_SLOTS.release()
+        DOWNLOAD_SLOTS.release()
+
     def test_unused_link_expires(self):
         store = DownloadFiles()
         temporary = tempfile.TemporaryDirectory()
@@ -293,6 +326,78 @@ class DownloadTests(unittest.TestCase):
             self.assertIsNone(store.take(token))
         finally:
             temporary.cleanup()
+
+
+class ResourceTests(unittest.TestCase):
+    def test_storage_counts_retained_and_partial_files(self):
+        with tempfile.TemporaryDirectory() as root:
+            guard = StorageGuard()
+            guard.root = Path(root)
+            guard.quota = 10
+            guard.min_free = 0
+            retained = guard.root / 'retained'
+            retained.mkdir()
+            (retained / 'video.mp4').write_bytes(b'123456')
+            partial = guard.root / 'active.part'
+            partial.write_bytes(b'1234')
+            with self.assertRaisesRegex(DownloadError, 'quota'):
+                guard.check()
+            partial.unlink()
+            guard.check()
+            guard.min_free = 100
+            with patch('server.shutil.disk_usage', return_value=Mock(free=99)):
+                with self.assertRaisesRegex(DownloadError, 'disk space'):
+                    guard.check()
+
+    def test_rate_window_and_bounded_clients(self):
+        limiter = RateLimiter()
+        limiter.limit = 2
+        limiter.max_clients = 1
+        with patch('server.time.monotonic', return_value=0):
+            self.assertTrue(limiter.allow('one'))
+            self.assertTrue(limiter.allow('one'))
+            self.assertFalse(limiter.allow('one'))
+            self.assertFalse(limiter.allow('two'))
+        with patch('server.time.monotonic', return_value=limiter.window):
+            self.assertTrue(limiter.allow('two'))
+
+    def test_forwarding_requires_trusted_peer_and_chain(self):
+        with patch('server.TRUSTED_PROXY_NETWORKS', (ipaddress.ip_network('10.0.0.0/24'),)):
+            self.assertEqual(client_identity('192.0.2.1', '198.51.100.1'), '192.0.2.1')
+            self.assertEqual(client_identity('10.0.0.2', '198.51.100.1'), '198.51.100.1')
+            self.assertEqual(client_identity('10.0.0.2', '192.0.2.8, 198.51.100.1'), '198.51.100.1')
+            self.assertEqual(client_identity('10.0.0.2', '192.0.2.8, 10.0.0.3'), '192.0.2.8')
+            self.assertEqual(client_identity('10.0.0.2', 'invalid'), '10.0.0.2')
+
+    def test_silent_media_is_stopped_on_storage_breach(self):
+        released = threading.Event()
+        process = Mock()
+        process.stdout.readline.side_effect = lambda size: (released.wait(3) and '')
+        process.wait.return_value = 1
+        guard = Mock(interval=0.01)
+        guard.check.side_effect = [None, None, DownloadError('storage quota reached')]
+        def stop(media):
+            self.assertIs(media, process)
+            released.set()
+        with tempfile.TemporaryDirectory() as root, \
+                patch('server.STORAGE', guard), \
+                patch('server.COOKIES_FILE', Path(root) / 'absent'), \
+                patch('server.subprocess.run', return_value=subprocess.CompletedProcess([], 0, b'{}', b'')), \
+                patch('server.subprocess.Popen', return_value=process), \
+                patch('server.stop_process', side_effect=stop) as stopped:
+            with self.assertRaisesRegex(DownloadError, 'quota'):
+                download_video('https://youtu.be/abc', 'default', Path(root), Mock())
+            self.assertTrue(released.is_set())
+            self.assertGreaterEqual(stopped.call_count, 1)
+
+    def test_posix_kills_group_even_when_leader_has_exited(self):
+        from server import stop_process
+        process = Mock(pid=123)
+        process.poll.return_value = 0
+        with patch('server.os.name', 'posix'), patch('server.signal.SIGKILL', 9, create=True), \
+                patch('server.os.killpg', create=True) as kill:
+            stop_process(process)
+            kill.assert_called_once_with(123, 9)
 
 
 if __name__ == '__main__':
