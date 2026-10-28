@@ -203,6 +203,7 @@ const Homepage = (): JSX.Element => {
             isKeepVideo,
             mp3EncodingType,
             mp3VbrSetting,
+            downmixToStereo,
           };
           break;
         case 'Opus':

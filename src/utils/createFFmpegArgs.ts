@@ -42,6 +42,7 @@ export type EncodingOptions =
       isKeepVideo: boolean;
       mp3EncodingType: string;
       mp3VbrSetting: string;
+      downmixToStereo: boolean;
     }
   | {
       codec: "Opus";
@@ -76,18 +77,18 @@ interface CodecHandlerResult {
 const COPY_AUDIO_STREAM = ["-c:a", "copy"];
 const COPY_VIDEO_STREAM = ["-c:V", "copy"];
 
-const handleAAC = (options: Extract<EncodingOptions, { codec: "AAC" }>, outputName: string, ext: string): CodecHandlerResult => {
+const handleAAC = (options: Extract<EncodingOptions, { codec: "AAC" }>, outputName: string): CodecHandlerResult => {
   const args = [];
   if (options.isKeepVideo) args.push(...COPY_VIDEO_STREAM);
   args.push("-c:a", "aac", "-b:a", `${options.bitrateSliderValue}k`);
-  return { args, outputFilename: `${outputName}${options.isKeepVideo ? ext : ".aac"}` };
+  return { args, outputFilename: `${outputName}${options.isKeepVideo ? ".mkv" : ".aac"}` };
 };
 
-const handleAC3 = (options: Extract<EncodingOptions, { codec: "AC3" }>, outputName: string, ext: string): CodecHandlerResult => {
+const handleAC3 = (options: Extract<EncodingOptions, { codec: "AC3" }>, outputName: string): CodecHandlerResult => {
   const args = [];
   if (options.isKeepVideo) args.push(...COPY_VIDEO_STREAM);
   args.push("-c:a", "ac3", "-b:a", `${options.ac3Bitrate}k`);
-  return { args, outputFilename: `${outputName}${options.isKeepVideo ? ext : ".ac3"}` };
+  return { args, outputFilename: `${outputName}${options.isKeepVideo ? ".mkv" : ".ac3"}` };
 };
 
 const handleALAC = (options: Extract<EncodingOptions, { codec: "ALAC" }>, outputName: string): CodecHandlerResult => {
@@ -101,11 +102,11 @@ const handleCAF = (options: Extract<EncodingOptions, { codec: "CAF" }>, outputNa
   return { args: ["-c:a", "alac"], outputFilename: `${outputName}.caf` };
 };
 
-const handleDTS = (options: Extract<EncodingOptions, { codec: "DTS" }>, outputName: string, ext: string): CodecHandlerResult => {
+const handleDTS = (options: Extract<EncodingOptions, { codec: "DTS" }>, outputName: string): CodecHandlerResult => {
   const args = [];
   if (options.isKeepVideo) args.push(...COPY_VIDEO_STREAM);
   args.push("-c:a", "dca", "-b:a", `${options.bitrateSliderValue}k`, "-strict", "-2");
-  return { args, outputFilename: `${outputName}${options.isKeepVideo ? ext : ".dts"}` };
+  return { args, outputFilename: `${outputName}${options.isKeepVideo ? ".mkv" : ".dts"}` };
 };
 
 const handleFLAC = (options: Extract<EncodingOptions, { codec: "FLAC" }>, outputName: string): CodecHandlerResult => {
@@ -128,7 +129,7 @@ const handleMP3 = (options: Extract<EncodingOptions, { codec: "MP3" }>, outputNa
   if (options.mp3EncodingType === "cbr") {
     args.push("-b:a", `${options.bitrateSliderValue}k`);
   } else if (options.mp3EncodingType === "abr") {
-    args.push("--abr", "1", "-b:a", `${options.bitrateSliderValue}k`);
+    args.push("-abr", "1", "-b:a", `${options.bitrateSliderValue}k`);
   } else { // VBR
     args.push("-q:a", options.mp3VbrSetting);
   }
@@ -165,10 +166,10 @@ export const createFFmpegArgs = (
 
   switch (options.codec) {
     case "AAC":
-      result = handleAAC(options, outputName, ext);
+      result = handleAAC(options, outputName);
       break;
     case "AC3":
-      result = handleAC3(options, outputName, ext);
+      result = handleAC3(options, outputName);
       break;
     case "ALAC":
       result = handleALAC(options, outputName);
@@ -177,7 +178,7 @@ export const createFFmpegArgs = (
       result = handleCAF(options, outputName);
       break;
     case "DTS":
-      result = handleDTS(options, outputName, ext);
+      result = handleDTS(options, outputName);
       break;
     case "FLAC":
       result = handleFLAC(options, outputName);
