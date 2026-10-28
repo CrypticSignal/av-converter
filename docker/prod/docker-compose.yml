@@ -16,6 +16,7 @@ services:
     networks:
       default:
       downloader_proxy:
+        ipv4_address: 172.30.50.3
         aliases:
           - downloader-api
     volumes:
