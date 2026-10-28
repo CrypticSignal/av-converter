@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAppSelector } from '../redux/hooks';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { convertFile } from '../utils/convertFile';
@@ -118,8 +118,15 @@ const Homepage = (): JSX.Element => {
 
   const bitrateSliderValue = useAppSelector((state) => state.bitrate.value);
 
-  const ffmpegRef = useRef(new FFmpeg());
-  const ffmpeg = ffmpegRef.current;
+  const ffmpegRef = useRef<FFmpeg | null>(null);
+  useEffect(() => {
+    const instance = new FFmpeg();
+    ffmpegRef.current = instance;
+    return () => {
+      ffmpegRef.current = null;
+      instance.terminate();
+    };
+  }, []);
 
   const onConvertClicked = () => {
     if (file === undefined) {
@@ -241,7 +248,10 @@ const Homepage = (): JSX.Element => {
     }
 
     setFfmpegCommand(`ffmpeg ${ffmpegArgs.join(' ')}`);
-    convertFile(ffmpeg, file, ffmpegArgs, inputFilename, outputFilename, setProgress, setAlertMessage, setAlertSeverity, setIsConverting);
+    const ffmpeg = ffmpegRef.current;
+    if (!ffmpeg) return;
+    void convertFile(ffmpeg, file, ffmpegArgs, inputFilename, outputFilename, setProgress, setAlertMessage, setAlertSeverity, setIsConverting,
+      () => ffmpegRef.current === ffmpeg);
   };
 
   const showFormatSettings = (): JSX.Element | null => {

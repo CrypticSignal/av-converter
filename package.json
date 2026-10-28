@@ -17,6 +17,7 @@
     "react-router-dom": "^7.6.0"
   },
   "scripts": {
+    "test": "vitest run",
     "deploy": "yarn install && yarn build",
     "dev": "vite",
     "build": "tsc && vite build",
@@ -29,12 +30,16 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.7",
+    "@testing-library/dom": "10.4.0",
+    "@testing-library/react": "16.1.0",
     "@types/node": "^20.14.2",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "jsdom": "25.0.1",
     "tailwindcss": "^4.1.7",
     "typescript": "^5.4.5",
-    "vite": "^5.2.13"
+    "vite": "^5.2.13",
+    "vitest": "2.1.9"
   }
 }
