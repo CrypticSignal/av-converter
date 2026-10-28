@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAppSelector } from '../redux/hooks';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { convertFile } from '../utils/convertFile';
+import OperationStatus from '../components/OperationStatus';
+import type { OperationProgress } from '../utils/progress';
+import Button from '@mui/material/Button';
 import { createFFmpegArgs, EncodingOptions } from '../utils/createFFmpegArgs';
 // General Components
 import BitrateSlider from '../components/BitrateSlider';
@@ -23,8 +26,6 @@ import VorbisEncodingType from '../components/Vorbis/EncodingType';
 import WavBitDepthSelector from '../components/WavBitDepthSelector';
 // Material UI
 import Alert, { AlertColor } from '@mui/material/Alert';
-import LinearProgress from '@mui/material/LinearProgress';
-import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Divider from '@mui/material/Divider';
 
@@ -57,7 +58,10 @@ const Homepage = (): JSX.Element => {
   // Downmix to stereo?
   const [downmixToStereo, setDownmixToStereo] = useState(false);
   // Conversion progress.
-  const [progress, setProgress] = useState(0);
+  const [, setProgress] = useState(0);
+  const [status, setStatus] = useState<OperationProgress>({ stage: 'Ready' });
+  const [logs, setLogs] = useState('');
+  const session = useRef<object | null>(null);
 
   const onFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.currentTarget.files && e.currentTarget.files[0]) {
@@ -123,12 +127,26 @@ const Homepage = (): JSX.Element => {
     const instance = new FFmpeg();
     ffmpegRef.current = instance;
     return () => {
+      session.current = null;
+      const current = ffmpegRef.current;
       ffmpegRef.current = null;
-      instance.terminate();
+      current?.terminate();
     };
   }, []);
 
+  const cancel = () => {
+    session.current = null;
+    const current = ffmpegRef.current;
+    ffmpegRef.current = null;
+    current?.terminate();
+    setIsConverting(false);
+    setAlertMessage('Conversion cancelled.');
+    setAlertSeverity('info');
+    setStatus({ stage: 'Cancelled' });
+  };
+
   const onConvertClicked = () => {
+    if (session.current) return;
     if (file === undefined) {
       setAlertSeverity('error');
       setAlertMessage('You must select an input file.');
@@ -249,10 +267,18 @@ const Homepage = (): JSX.Element => {
     }
 
     setFfmpegCommand(`ffmpeg ${ffmpegArgs.join(' ')}`);
-    const ffmpeg = ffmpegRef.current;
-    if (!ffmpeg) return;
+    const ffmpeg = ffmpegRef.current ?? new FFmpeg();
+    ffmpegRef.current = ffmpeg;
+    const currentSession = {};
+    session.current = currentSession;
+    const active = () => session.current === currentSession && ffmpegRef.current === ffmpeg;
+    setLogs('');
+    setIsConverting(true);
     void convertFile(ffmpeg, file, ffmpegArgs, inputFilename, outputFilename, setProgress, setAlertMessage, setAlertSeverity, setIsConverting,
-      () => ffmpegRef.current === ffmpeg);
+      active, { status: value => { if (active()) setStatus(value); },
+        log: message => { if (active()) setLogs(previous => (previous + message + '\n').slice(-100_000)); },
+        knownTimeline: !manualMode,
+      }).finally(() => { if (active()) session.current = null; });
   };
 
   const showFormatSettings = (): JSX.Element | null => {
@@ -445,17 +471,8 @@ const Homepage = (): JSX.Element => {
         {ffmpegCommand && <>Running: {ffmpegCommand}...</>}
       </div>
 
-      <div className={`my-4 w-full max-w-xs mx-auto ${isConverting && progress > 0 && progress < 100 ? 'block' : 'hidden'}`}>
-        <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-          <Box sx={{ width: '100%', mr: 1 }}>
-            <LinearProgress variant="determinate" value={progress} />
-          </Box>
-          <Box sx={{ minWidth: 35 }}>
-            <Typography variant="body2" color="text.secondary">{`${Math.round(progress)}%`}</Typography>
-          </Box>
-        </Box>
-      </div>
-
+      <OperationStatus progress={status} busy={isConverting} logs={logs} />
+      {isConverting && <Button onClick={cancel}>Cancel</Button>}
       {alertMessage && <div className="w-full max-w-xs mx-auto"><Alert severity={alertSeverity} sx={{ textAlign: 'center', my: 2, display: 'flex', justifyContent: 'center' }}>{alertMessage}</Alert></div>}
 
       <div className={`mt-4 ${!isConverting ? 'block' : 'hidden'}`}>

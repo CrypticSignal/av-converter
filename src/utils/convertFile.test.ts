@@ -82,6 +82,102 @@ describe('FFmpeg loading', () => {
 });
 
 describe('conversion cleanup', () => {
+  it('does not finish a new session when cancellation occurs during filesystem cleanup', async () => {
+    const old = worker();
+    const cleaning = deferred<boolean>();
+    old.deleteFile.mockResolvedValueOnce(true).mockReturnValueOnce(cleaning.promise);
+    let active = true;
+    const first = run(old, () => active);
+    await vi.waitFor(() => expect(old.deleteFile).toHaveBeenCalledWith('in.wav'));
+    active = false;
+    const next = worker();
+    const running = deferred<number>();
+    next.exec.mockReturnValue(running.promise);
+    const second = run(next);
+    await vi.waitFor(() => expect(next.exec).toHaveBeenCalled());
+    const calls = second.setters.map(s => s.mock.calls.length);
+    cleaning.resolve(true);
+    await first.promise;
+    expect(old.deleteFile.mock.calls).toEqual([['out.wav'], ['in.wav']]);
+    expect(second.setters.map(s => s.mock.calls.length)).toEqual(calls);
+    running.resolve(0);
+    await second.promise;
+  });
+
+  it.each(['load', 'fetch', 'write', 'exec', 'read'])('suppresses completion and cleanup writes after cancellation during %s', async phase => {
+    const w = worker();
+    const pending = deferred<any>();
+    if (phase === 'load') w.load.mockReturnValue(pending.promise);
+    if (phase === 'fetch') vi.mocked(fetchFile).mockReturnValueOnce(pending.promise);
+    if (phase === 'write') w.writeFile.mockReturnValue(pending.promise);
+    if (phase === 'exec') w.exec.mockReturnValue(pending.promise);
+    if (phase === 'read') w.readFile.mockReturnValue(pending.promise);
+    let active = true;
+    const job = run(w, () => active);
+    const target = phase === 'load' ? w.load : phase === 'fetch' ? fetchFile : phase === 'write' ? w.writeFile : phase === 'exec' ? w.exec : w.readFile;
+    await vi.waitFor(() => expect(target).toHaveBeenCalled());
+    active = false;
+    const setterCalls = job.setters.map(s => s.mock.calls.length);
+    const deleteCalls = w.deleteFile.mock.calls.length;
+    pending.resolve(phase === 'read' || phase === 'fetch' ? new Uint8Array([1]) : 0);
+    await job.promise;
+    expect(job.setters.map(s => s.mock.calls.length)).toEqual(setterCalls);
+    expect(w.deleteFile).toHaveBeenCalledTimes(deleteCalls);
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('keeps a restarted worker isolated from an old execution finalizer', async () => {
+    const old = worker();
+    const execution = deferred<number>();
+    old.exec.mockReturnValue(execution.promise);
+    let active = true;
+    const first = run(old, () => active);
+    await vi.waitFor(() => expect(old.exec).toHaveBeenCalled());
+    active = false;
+    const next = worker();
+    const nextExecution = deferred<number>();
+    next.exec.mockReturnValue(nextExecution.promise);
+    const second = run(next);
+    await vi.waitFor(() => expect(next.exec).toHaveBeenCalled());
+    const calls = second.setters.map(s => s.mock.calls.length);
+    execution.resolve(0);
+    await first.promise;
+    expect(next.deleteFile.mock.calls).toEqual([['out.wav']]);
+    expect(second.setters.map(s => s.mock.calls.length)).toEqual(calls);
+    nextExecution.resolve(0);
+    await second.promise;
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledOnce();
+  });
+
+  it.each([true, false])('reports processed time, observed speed and only a usable timeline ETA (%s)', async knownTimeline => {
+    const w = worker();
+    const execution = deferred<number>();
+    w.exec.mockReturnValue(execution.promise);
+    vi.spyOn(performance, 'now').mockReturnValue(1000);
+    const status = vi.fn();
+    const log = vi.fn();
+    const setters = [vi.fn(), vi.fn(), vi.fn(), vi.fn()] as const;
+    const promise = convertFile(asFFmpeg(w), new File(['input'], 'in.wav'),
+      ['-i', 'in.wav', 'out.wav'], 'in.wav', 'out.wav', ...setters, () => true, { status, log, knownTimeline });
+    await vi.waitFor(() => expect(w.exec).toHaveBeenCalled());
+    const onLog = w.on.mock.calls.find(call => call[0] === 'log')![1];
+    const onProgress = w.on.mock.calls.find(call => call[0] === 'progress')![1];
+    onLog({ message: 'Duration: 00:01:40.00, start: 0' });
+    vi.mocked(performance.now).mockReturnValue(6000);
+    onProgress({ progress: 0.99, time: 25_000_000 });
+    expect(status).toHaveBeenLastCalledWith(expect.objectContaining({
+      stage: 'Converting', elapsed: 5, speed: '5.00x',
+      percent: knownTimeline ? 25 : undefined, eta: knownTimeline ? 15 : undefined,
+    }));
+    onProgress({ progress: NaN, time: Infinity });
+    expect(status.mock.calls.at(-1)![0].percent).toBeUndefined();
+    expect(status.mock.calls.at(-1)![0].speed).toBeUndefined();
+    expect(log).toHaveBeenCalledOnce();
+    execution.resolve(0);
+    await promise;
+    expect(status.mock.calls.map(call => call[0].stage)).toEqual(expect.arrayContaining(['Loading FFmpeg', 'Preparing output', 'Conversion complete']));
+  });
+
   it('removes stale output before execution, cleans files/listeners, and revokes download URLs', async () => {
     vi.useFakeTimers();
     const w = worker();

@@ -2,6 +2,7 @@ import type { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { Dispatch, SetStateAction } from 'react';
 import { AlertColor } from '@mui/material';
+import { nonnegative, OperationProgress } from './progress';
 
 const loads = new WeakMap<FFmpeg, Promise<void>>();
 
@@ -43,15 +44,32 @@ export const convertFile = async (
   setAlertSeverity: Dispatch<SetStateAction<AlertColor>>,
   setIsConverting: Dispatch<SetStateAction<boolean>>,
   isActive = () => true,
+  observe?: { status: (value: OperationProgress) => void; log: (message: string) => void; knownTimeline: boolean },
 ) => {
+  let duration: number | undefined;
+  let started: number | undefined;
+  const report = (value: OperationProgress) => { if (isActive()) observe?.status(value); };
   const checkActive = () => { if (!isActive()) throw new Error('Page unmounted'); };
   const onLog = ({ message }: { message: string }) => {
     if (!isActive()) return;
-    setAlertSeverity(message === 'Aborted()' ? 'error' : 'info');
-    setAlertMessage(message === 'Aborted()' ? 'Unable to convert file.' : message);
+    observe?.log(message);
+    const match = message.match(/Duration: (\d+):(\d+):(\d+(?:\.\d+)?)/);
+    if (observe?.knownTimeline && match) {
+      const seconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+      if (seconds > 0) duration = seconds;
+    }
   };
-  const onProgress = ({ progress }: { progress: number }) => {
-    if (isActive()) setProgress(Math.round(progress * 100 * 10) / 10);
+  const onProgress = ({ time }: { progress: number; time?: number }) => {
+    if (!isActive() || started === undefined) return;
+    const elapsed = (performance.now() - started) / 1000;
+    const seconds = nonnegative(time) ? time / 1_000_000 : undefined;
+    const rate = seconds !== undefined && seconds > 0 && elapsed > 0 ? seconds / elapsed : undefined;
+    const percent = duration && seconds !== undefined ? Math.min(100, seconds / duration * 100) : undefined;
+    if (percent !== undefined) setProgress(percent);
+    report({ stage: 'Converting', elapsed, percent,
+      detail: seconds !== undefined ? `Processed ${seconds.toFixed(1)}s` : undefined,
+      speed: rate !== undefined ? `${rate.toFixed(2)}x` : undefined,
+      eta: duration && seconds !== undefined && rate ? Math.max(0, duration - seconds) / rate : undefined });
   };
   let filesTouched = false;
   try {
@@ -59,6 +77,7 @@ export const convertFile = async (
     setIsConverting(true);
     setAlertSeverity('info');
     setAlertMessage('Loading @ffmpeg/core-mt...');
+    report({ stage: 'Loading FFmpeg' });
     await loadFFmpeg(ffmpeg, isActive);
     checkActive();
     ffmpeg.on('log', onLog);
@@ -71,10 +90,14 @@ export const convertFile = async (
     checkActive();
     await ffmpeg.writeFile(inputFilename, input);
     checkActive();
+    started = performance.now();
+    report({ stage: 'Converting' });
+    setAlertMessage('Converting');
     const exitCode = await ffmpeg.exec(ffmpegArgs);
     checkActive();
     if (exitCode !== 0) throw new Error(`FFmpeg exited with code ${exitCode}`);
     setProgress(0);
+    report({ stage: 'Preparing output' });
     const fileData = await ffmpeg.readFile(outputFilename);
     checkActive();
     const data = new Uint8Array(fileData as Uint8Array);
@@ -89,18 +112,21 @@ export const convertFile = async (
     }
     setAlertSeverity('success');
     setAlertMessage('Done! The converted file should have started downloading.');
+    report({ stage: 'Conversion complete' });
   } catch (error) {
     if (isActive()) {
       console.error(error);
       setAlertSeverity('error');
       setAlertMessage('An error occurred during conversion.');
+      report({ stage: 'Conversion failed' });
     }
   } finally {
     ffmpeg.off('log', onLog);
     ffmpeg.off('progress', onProgress);
-    if (filesTouched) {
+    if (filesTouched && isActive()) {
       // Missing files and a terminated worker are expected cleanup cases.
       for (const name of new Set([inputFilename, outputFilename])) {
+        if (!isActive()) break;
         try { await ffmpeg.deleteFile(name); } catch { /* best effort */ }
       }
     }

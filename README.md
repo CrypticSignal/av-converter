@@ -36,6 +36,32 @@
 
 Click on **Video Downloader** in the navigation bar (or visit `/download`). This is essentially a [yt-dlp](https://github.com/yt-dlp/yt-dlp) wrapper.
 
+### Progress and cancellation (item 5)
+
+Both pages provide a **Cancel** button while working, a polite accessible live
+status, and expandable logs retaining only the latest 100,000 characters.
+Cancelling or leaving the downloader page aborts its streaming request. Late
+events and cleanup from a cancelled request cannot affect a restarted download.
+Cancellation applies to preparation/recording, not a file transfer already
+handed off to the browser's native download manager.
+
+Downloader progress consumes structured backend events. Percentages use exact
+byte totals, never estimated totals; speed and ETA appear only when reported as
+finite nonnegative values. Metadata, postprocessing, and recordings without a
+known total use an indeterminate indicator. A percentage is per stream, not an
+overall guarantee across separate audio/video downloads and merging.
+
+Converter cancellation terminates the FFmpeg worker immediately, including
+during loading. The next run creates a fresh worker; successful uncancelled runs
+reuse their loaded worker. Leaving the page also terminates it. Old callbacks
+and finalizers cannot update a new session or delete its files.
+Conversion progress uses FFmpeg's processed media time (microseconds), measured
+execution elapsed time, and their ratio for observed processing speed. Standard
+conversions can show percentage and estimated remaining time once FFmpeg reports
+a duration. Manual commands keep percentage/ETA unknown because trimming, time
+filters, and custom outputs can change the timeline. Loading, output preparation,
+and unknown-duration media stay indeterminate; no synthetic progress is used.
+
 ### YouTube cookies
 
 For a private, access-controlled deployment, an exported Netscape-format cookie

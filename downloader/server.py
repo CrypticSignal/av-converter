@@ -4,6 +4,7 @@ import json
 import logging
 import mimetypes
 import os
+import queue
 from pathlib import Path
 import secrets
 import shutil
@@ -21,6 +22,9 @@ DOWNLOAD_SLOTS = threading.BoundedSemaphore(2)
 # Keep in sync with client_max_body_size in docker/prod/nginx.conf.
 MAX_REQUEST_BYTES = 8 * 1024
 DOWNLOAD_LINK_SECONDS = 10 * 60
+HEARTBEAT_SECONDS = 5
+METADATA_TIMEOUT_SECONDS = 120
+PROGRESS_PREFIX = 'av-progress:'
 ALLOWED_DOMAINS = ('youtube.com', 'youtu.be', 'vimeo.com', 'tiktok.com')
 COOKIES_FILE = Path(__file__).with_name('cookies.txt')
 YTDLP_ARGS = [
@@ -154,14 +158,101 @@ def stop_process(process):
     if os.name == 'nt':
         if process.poll() is not None:
             return
-        subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        finally:
+            if process.poll() is None:
+                process.kill()
     else:
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
     process.wait()
+
+
+def run_monitored(args, on_output, metadata=False):
+    """Drain both pipes while checking storage and the client even for silent jobs."""
+    options = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == 'nt' else {'start_new_session': True}
+    process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, encoding='utf-8', errors='replace', bufsize=1,
+                               **options)
+    messages = queue.Queue(maxsize=128)
+    finished = threading.Event()
+    readers = []
+    captured = []
+
+    def read(pipe, source):
+        try:
+            while not finished.is_set():
+                line = pipe.readline(16384)
+                if not line:
+                    break
+                while not finished.is_set():
+                    try:
+                        messages.put((source, line), timeout=0.1)
+                        break
+                    except queue.Full:
+                        pass
+        except Exception as exc:
+            while not finished.is_set():
+                try:
+                    messages.put((None, exc), timeout=0.1)
+                    break
+                except queue.Full:
+                    pass
+        finally:
+            while not finished.is_set():
+                try:
+                    messages.put((source, None), timeout=0.1)
+                    break
+                except queue.Full:
+                    pass
+
+    started = time.monotonic()
+    heartbeat = started + HEARTBEAT_SECONDS
+    storage_check = started + STORAGE.interval
+    try:
+        for source, pipe in (('stdout', process.stdout), ('stderr', process.stderr)):
+            thread = threading.Thread(target=read, args=(pipe, source), name='download-pipe')
+            thread.start()
+            readers.append(thread)
+        closed = 0
+        while closed < 2 or process.poll() is None:
+            now = time.monotonic()
+            if metadata and now - started >= METADATA_TIMEOUT_SECONDS:
+                raise DownloadError('Video information lookup timed out.')
+            if now >= storage_check:
+                STORAGE.check()
+                storage_check = now + STORAGE.interval
+            if now >= heartbeat:
+                on_output({'type': 'heartbeat'})
+                heartbeat = now + HEARTBEAT_SECONDS
+            try:
+                source, line = messages.get(timeout=0.05)
+            except queue.Empty:
+                continue
+            if source is None:
+                raise line
+            if line is None:
+                closed += 1
+            elif metadata and source == 'stdout':
+                captured.append(line)
+            else:
+                on_output(line.rstrip())
+        if process.wait():
+            raise DownloadError('yt-dlp could not complete the download. See its output above for details.')
+        return ''.join(captured)
+    finally:
+        finished.set()
+        try:
+            stop_process(process)
+        finally:
+            for thread in readers:
+                thread.join()
+            process.stdout.close()
+            process.stderr.close()
 
 
 def validate_url(value):
@@ -179,6 +270,10 @@ def validate_url(value):
     return value
 
 
+def read_metadata(args, on_output):
+    return run_monitored(args, on_output, metadata=True)
+
+
 def download_video(url, download_type, directory, on_output):
     """Download one video into directory and return its final, postprocessed path.
 
@@ -193,18 +288,11 @@ def download_video(url, download_type, directory, on_output):
         shutil.copyfile(COOKIES_FILE, cookies)
         args += ['--cookies', str(cookies)]
 
-    on_output('Checking video information…')
-    try:
-        metadata = subprocess.run(
-            args + ['--dump-single-json', '--flat-playlist', '--playlist-items', '1', '--', url],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=120)
-    except subprocess.CalledProcessError as exc:
-        for line in (exc.stderr or b'').decode('utf-8', errors='replace').splitlines():
-            on_output(line)
-        raise
-    for line in metadata.stderr.decode('utf-8', errors='replace').splitlines():
-        on_output(line)
-    info = json.loads(metadata.stdout)
+    on_output({'type': 'stage', 'stage': 'metadata', 'message': 'Checking video information…'})
+    metadata = read_metadata(
+        args + ['--dump-single-json', '--flat-playlist', '--playlist-items', '1', '--', url],
+        on_output)
+    info = json.loads(metadata)
     if not isinstance(info, dict):
         raise DownloadError('The source returned invalid video information.')
     # --no-playlist alone still permits playlist-only URLs. Watch links with a
@@ -214,44 +302,16 @@ def download_video(url, download_type, directory, on_output):
 
     STORAGE.check()
     manifest = directory / 'result.txt'
-    process = subprocess.Popen(
+    on_output({'type': 'stage', 'stage': 'download', 'message': 'Downloading media…'})
+    run_monitored(
         args + DOWNLOAD_TYPES[download_type] + [
             '--newline', '--progress', '--progress-delta', '1', '--no-colors',
+            '--progress-template', 'download:' + PROGRESS_PREFIX + '%(progress)j',
+            '--progress-template', 'postprocess:' + PROGRESS_PREFIX + '%(progress)j',
             '-P', str(directory),
             '--print-to-file', 'after_move:filepath', str(manifest), '--', url],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        encoding='utf-8', errors='replace', bufsize=1, start_new_session=os.name != 'nt')
-    finished = threading.Event()
-    failures = []
-
-    def monitor_storage():
-        while not finished.wait(STORAGE.interval):
-            try:
-                STORAGE.check()
-            except Exception as exc:
-                failures.append(exc if isinstance(exc, DownloadError) else
-                                DownloadError('Unable to verify downloader storage safety.'))
-                stop_process(process)
-                return
-
-    monitor = threading.Thread(target=monitor_storage, daemon=True)
-    monitor.start()
-    try:
-        while line := process.stdout.readline(16384):
-            on_output(line.rstrip())
-        result = process.wait()
-        finished.set()
-        monitor.join()
-        if failures:
-            raise failures[0]
-        STORAGE.check()
-        if result:
-            raise DownloadError('yt-dlp could not complete the download. See its output above for details.')
-    finally:
-        finished.set()
-        monitor.join()
-        stop_process(process)
-        process.stdout.close()
+        on_output)
+    STORAGE.check()
     if not manifest.is_file():
         raise DownloadError('The download did not produce an output file.')
     output = Path(manifest.read_text(encoding='utf-8').strip()).resolve()
@@ -271,8 +331,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def event(self, event_type, **data):
-        self.wfile.write((json.dumps({'type': event_type, **data}) + '\n').encode())
-        self.wfile.flush()
+        with self.event_lock:
+            self.wfile.write((json.dumps({'type': event_type, **data}, allow_nan=False) + '\n').encode())
+            self.wfile.flush()
 
     def do_GET(self):
         prefix = '/api/download/'
@@ -296,7 +357,7 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 shutil.copyfileobj(video, self.wfile, length=64 * 1024)
                 self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
+        except ConnectionError:
             LOGGER.info('Client disconnected during file transfer.')
         except OSError:
             LOGGER.exception('File transfer failed')
@@ -333,6 +394,7 @@ class DownloadHandler(BaseHTTPRequestHandler):
             return
 
         temporary = None
+        self.event_lock = threading.Lock()
         token = None
         response_started = False
         try:
@@ -346,6 +408,22 @@ class DownloadHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
             def on_output(line):
+                if isinstance(line, dict):
+                    self.event(line['type'], **{key: value for key, value in line.items() if key != 'type'})
+                    return
+                if line.startswith(PROGRESS_PREFIX):
+                    try:
+                        progress = json.loads(line[len(PROGRESS_PREFIX):])
+                        if not isinstance(progress, dict):
+                            raise ValueError()
+                        stage = 'postprocess' if progress.get('postprocessor') else 'download'
+                        self.event('progress', stage=stage, **{
+                            key: progress.get(key) for key in (
+                                'status', 'downloaded_bytes', 'total_bytes',
+                                'total_bytes_estimate', 'speed', 'eta', 'fragment_index', 'fragment_count')})
+                        return
+                    except (ValueError, TypeError):
+                        pass
                 LOGGER.info('%s', line)
                 self.event('log', message=line)
 
@@ -353,7 +431,7 @@ class DownloadHandler(BaseHTTPRequestHandler):
             STORAGE.check()
             token = DOWNLOAD_FILES.add(temporary, output)
             self.event('ready', url=f'/api/download/{token}', filename=output.name)
-        except (BrokenPipeError, ConnectionResetError):
+        except ConnectionError:
             LOGGER.info('Client disconnected from a download.')
             if token:
                 DOWNLOAD_FILES.discard(token)
@@ -367,7 +445,7 @@ class DownloadHandler(BaseHTTPRequestHandler):
                     self.event('error', message=message)
                 else:
                     self.error(507 if isinstance(exc, DownloadError) else 500, message)
-            except (BrokenPipeError, ConnectionResetError):
+            except ConnectionError:
                 pass
         finally:
             if temporary and not token:
