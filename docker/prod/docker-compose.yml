@@ -3,6 +3,13 @@ services:
     build: ../../downloader
     init: true
     restart: unless-stopped
+    volumes:
+      - type: bind
+        source: ../../cookies.txt
+        target: /app/cookies.txt
+        read_only: true
+        bind:
+          create_host_path: false
   nginx:
     container_name: nginx
     image: nginx:latest

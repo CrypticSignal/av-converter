@@ -21,6 +21,13 @@ class DownloadTests(unittest.TestCase):
         self.thread.start()
         self.outputs = []
         self.output_basename = 'Test video [abc]'
+        # Never read a developer's real cookie export while running tests.
+        cookies_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(cookies_directory.cleanup)
+        self.cookies_source = Path(cookies_directory.name) / 'cookies.txt'
+        cookies_patch = patch('server.COOKIES_FILE', self.cookies_source)
+        cookies_patch.start()
+        self.addCleanup(cookies_patch.stop)
 
     def tearDown(self):
         self.server.shutdown()
@@ -97,7 +104,7 @@ class DownloadTests(unittest.TestCase):
                 validate_url(url)
 
     def test_formats_output_and_one_time_download(self):
-        for option, extension, mime in (('best', 'webm', 'video/webm'),
+        for option, extension, mime in (('default', 'webm', 'video/webm'),
                                         ('best_audio', 'opus', 'audio/ogg'),
                                         ('mp4', 'mp4', 'video/mp4'), ('mp3', 'mp3', 'audio/mpeg')):
             with self.subTest(option=option), patch('server.subprocess.run', side_effect=self.metadata), \
@@ -114,6 +121,56 @@ class DownloadTests(unittest.TestCase):
                 self.assertEqual(filename, ready['filename'])
                 self.assertEqual(body, b'video content')
                 self.assertEqual(self.request(path=ready['url'], method='GET')[0], 404)
+
+    def test_missing_cookies_uses_anonymous_requests(self):
+        with patch('server.subprocess.run', side_effect=self.metadata) as metadata, \
+                patch('server.subprocess.Popen', side_effect=self.media) as media:
+            self.assertEqual(self.events()[-1]['type'], 'ready')
+            self.assertNotIn('--cookies', metadata.call_args.args[0])
+            self.assertNotIn('--cookies', media.call_args.args[0])
+
+    def test_cookies_are_copied_and_used_for_both_commands(self):
+        original = '# Netscape HTTP Cookie File\n# synthetic test cookies\n'
+        self.cookies_source.write_text(original, encoding='utf-8')
+        copies = []
+
+        def metadata(args, **kwargs):
+            cookies = Path(args[args.index('--cookies') + 1])
+            self.assertNotEqual(cookies, self.cookies_source)
+            self.assertEqual(cookies.read_text(encoding='utf-8'), original)
+            copies.append(cookies)
+            cookies.write_text('# updated working cookies\n', encoding='utf-8')
+            return self.metadata(args, **kwargs)
+
+        def media(args, **kwargs):
+            cookies = Path(args[args.index('--cookies') + 1])
+            self.assertEqual(cookies, copies[-1])
+            self.assertEqual(cookies.read_text(encoding='utf-8'), '# updated working cookies\n')
+            return self.media(args, **kwargs)
+
+        with patch('server.subprocess.run', side_effect=metadata), \
+                patch('server.subprocess.Popen', side_effect=media):
+            for _ in range(2):
+                ready = self.events()[-1]
+                self.assertEqual(ready['type'], 'ready')
+                self.assertEqual(self.request(path=ready['url'], method='GET')[0], 200)
+        self.assertNotEqual(copies[0], copies[1])
+        self.assertEqual(self.cookies_source.read_text(encoding='utf-8'), original)
+        # tearDown joins the file-transfer handlers before unittest runs cleanups.
+        self.addCleanup(lambda: self.assertTrue(all(not cookies.exists() for cookies in copies)))
+
+    def test_cookie_copy_removed_after_failure(self):
+        self.cookies_source.write_text('# synthetic test cookies\n', encoding='utf-8')
+        copies = []
+
+        def fail(args, **kwargs):
+            copies.append(Path(args[args.index('--cookies') + 1]))
+            raise subprocess.CalledProcessError(1, 'yt-dlp', stderr=b'Test failure')
+
+        with patch('server.subprocess.run', side_effect=fail), self.assertLogs('server'):
+            self.assertEqual(self.events()[-1]['type'], 'error')
+        self.assertFalse(copies[0].exists())
+        self.assertTrue(self.cookies_source.exists())
 
     def test_unicode_filename(self):
         self.output_basename = 'Café 日本語 [abc]'

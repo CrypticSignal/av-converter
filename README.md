@@ -13,6 +13,7 @@
 
 - [Audio/video converter](#audiovideo-converter)
 - [Video Downloader](#video-downloader)
+  - [YouTube cookies](#youtube-cookies)
 - [Development](#development)
   - [Docker](#docker)
   - [Without Docker](#without-docker)
@@ -34,6 +35,35 @@
 ## Video Downloader
 
 Click on **Video Downloader** in the navigation bar (or visit `/download`). This is essentially a [yt-dlp](https://github.com/yt-dlp/yt-dlp) wrapper.
+
+### YouTube cookies
+
+For a private, access-controlled deployment, an exported Netscape-format cookie
+file can help with YouTube sign-in challenges. Cookies are login credentials:
+never commit them, expose them to visitors, or attach a personal session to an
+unrestricted public downloader. Authentication may still fail or expire.
+
+Production requires `cookies.txt` in the project root on the host. The production
+Compose configuration mounts it read-only into the downloader; it is never baked
+into the image. After securely supplying the export, recreate the downloader and
+reload Nginx:
+
+```sh
+docker compose -f docker/prod/docker-compose.yml up -d --build downloader
+docker compose -f docker/prod/docker-compose.yml exec -T nginx nginx -s reload
+```
+
+The source must already exist and be readable by the container's `downloader`
+user; use restrictive ownership/permissions rather than making it world-readable.
+A missing source causes startup to fail instead of creating a directory.
+Development Docker runs remain anonymous by default and do not require the file.
+
+Without Docker, place the file at `downloader/cookies.txt`. If present, it is
+copied into each request's temporary directory and used for both metadata and
+media extraction. This allows yt-dlp to update its working cookies without
+changing the original or sharing writes between requests. The copy is cleaned up
+with the download; replace the source export when its session expires. Outside
+the production Docker setup, requests without a cookie file continue anonymously.
 
 ## Development
 

@@ -20,6 +20,7 @@ DOWNLOAD_SLOTS = threading.BoundedSemaphore(2)
 MAX_REQUEST_BYTES = 8 * 1024
 DOWNLOAD_LINK_SECONDS = 10 * 60
 ALLOWED_DOMAINS = ('youtube.com', 'youtu.be', 'vimeo.com', 'tiktok.com')
+COOKIES_FILE = Path(__file__).with_name('cookies.txt')
 YTDLP_ARGS = [
     sys.executable, '-m', 'yt_dlp', '--ignore-config', '--js-runtimes', 'node',
     '--no-playlist', '--no-cache-dir', '--socket-timeout', '20',
@@ -107,10 +108,17 @@ def download_video(url, download_type, directory, on_output):
     Output is streamed through on_output rather than stored in memory.
     Media downloads have no overall timeout; live recordings end with the source.
     """
+    args = YTDLP_ARGS.copy()
+    if COOKIES_FILE.is_file():
+        # yt-dlp may update cookies. Keep the source read-only and isolate writers.
+        cookies = directory / 'cookies.txt'
+        shutil.copyfile(COOKIES_FILE, cookies)
+        args += ['--cookies', str(cookies)]
+
     on_output('Checking video information…')
     try:
         metadata = subprocess.run(
-            YTDLP_ARGS + ['--dump-single-json', '--flat-playlist', '--playlist-items', '1', '--', url],
+            args + ['--dump-single-json', '--flat-playlist', '--playlist-items', '1', '--', url],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=120)
     except subprocess.CalledProcessError as exc:
         for line in (exc.stderr or b'').decode('utf-8', errors='replace').splitlines():
@@ -128,7 +136,7 @@ def download_video(url, download_type, directory, on_output):
 
     manifest = directory / 'result.txt'
     process = subprocess.Popen(
-        YTDLP_ARGS + DOWNLOAD_TYPES[download_type] + [
+        args + DOWNLOAD_TYPES[download_type] + [
             '--newline', '--progress', '--progress-delta', '1', '--no-colors',
             '-P', str(directory),
             '--print-to-file', 'after_move:filepath', str(manifest), '--', url],
@@ -208,6 +216,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 raise ValueError('Request body is too large or missing.')
             fields = parse_qs(self.rfile.read(length).decode('utf-8'), max_num_fields=4)
             url = validate_url(fields.get('url', [''])[0].strip())
+            download_type = fields.get('format', ['default'])[0]
+            if download_type not in DOWNLOAD_TYPES:
+                raise ValueError('Choose a supported download type.')
         except (ValueError, UnicodeError) as exc:
             self.error(400, str(exc))
             return
@@ -231,7 +242,6 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 LOGGER.info('%s', line)
                 self.event('log', message=line)
 
-            download_type = fields.get('format', ['default'])[0]
             output = download_video(url, download_type, Path(temporary.name), on_output)
             token = DOWNLOAD_FILES.add(temporary, output)
             self.event('ready', url=f'/api/download/{token}', filename=output.name)
