@@ -22,7 +22,12 @@ const VorbisEncodingType: React.FC<VorbisEncodingTypeProps> = ({
   function renderComponent() {
     switch (vorbisEncodingType) {
       case "abr":
-        return <BitrateSlider value={bitrate} onChange={onBitrateChange} min="32" max="512" step="32" />;
+        return (
+          <>
+            <BitrateSlider value={bitrate} onChange={onBitrateChange} min="32" max="480" step="32" />
+            <i>For mono audio, choose 224 kbps or less, or the conversion will fail.</i>
+          </>
+        );
       case "vbr":
         return <QualitySlider onSliderMoved={onQualitySliderMoved} qValue={qValue} />;
       default:
