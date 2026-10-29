@@ -42,6 +42,13 @@ describe('audio formats and downmix', () => {
   });
 });
 
+it('FLAC keeps every stream once alongside the video', () => {
+  const args = run('input.mkv', 'FLAC', { isKeepVideo: true }).ffmpegArgs;
+  expect(args.filter(arg => arg === '-map')).toHaveLength(1);
+  expect(args).toEqual(['-i', 'input.mkv', '-c:V', 'copy', '-map', '0', '-c:s', 'copy',
+    '-c:a', 'flac', '-compression_level', '5', 'output.mkv']);
+});
+
 describe('encoding modes', () => {
   it.each([
     ['cbr', ['-b:a', '192k']],
