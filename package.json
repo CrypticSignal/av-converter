@@ -10,10 +10,8 @@
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "@mui/material": "^7.1.0",
-    "@reduxjs/toolkit": "^2.8.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-redux": "^9.2.0",
     "react-router-dom": "^7.6.0"
   },
   "scripts": {

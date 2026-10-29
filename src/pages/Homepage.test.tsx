@@ -12,7 +12,6 @@ vi.mock('@ffmpeg/ffmpeg', () => ({
     constructor() { instances.push(this); }
   },
 }));
-vi.mock('../redux/hooks', () => ({ useAppSelector: () => 192, useAppDispatch: () => vi.fn() }));
 vi.mock('../utils/convertFile', () => ({ convertFile: vi.fn(), loadFFmpeg: vi.fn() }));
 beforeEach(() => {
   instances.length = 0;
