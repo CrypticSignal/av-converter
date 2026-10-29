@@ -1,5 +1,4 @@
 import React from 'react';
-import type { EncodingOptions } from './utils/createFFmpegArgs';
 import BitrateSlider, { type BitrateSliderProps } from './components/BitrateSlider';
 import AC3 from './components/AC3';
 import DTS from './components/Dts';
@@ -10,7 +9,7 @@ import Opus from './components/Opus';
 import VorbisEncodingType from './components/Vorbis/EncodingType';
 import WavBitDepthSelector from './components/WavBitDepthSelector';
 
-export type Codec = EncodingOptions['codec'];
+export type Codec = 'AAC' | 'AC3' | 'ALAC' | 'CAF' | 'DTS' | 'FLAC' | 'MKA' | 'MP3' | 'Opus' | 'Vorbis' | 'WAV';
 
 export interface FormatSettings {
   ac3Bitrate: string;
@@ -54,70 +53,84 @@ interface PanelProps {
 
 interface Format {
   label: string;
+  /** Output extension for an audio-only file. */
+  extension: string;
   bitrate?: { initial: string; min: string; max: string; step: string };
-  /** Whether the format can be muxed alongside the input's video. */
-  keepVideo: boolean;
-  options: (settings: FormatSettings, bitrate: string) => EncodingOptions;
+  /**
+   * Set when the format can be muxed alongside the input's copied video:
+   * 'mp4' keeps an MP4 or MOV input's container (other inputs get MKV), 'mkv' always uses MKV.
+   */
+  keepVideo?: 'mp4' | 'mkv';
+  /** Audio arguments; `bitrate` is the slider value for formats with a bitrate range. */
+  args: (settings: FormatSettings, bitrate: string) => string[];
   Panel: (props: PanelProps) => React.ReactNode;
 }
 
 export const FORMATS: Record<Codec, Format> = {
   AAC: {
     label: 'AAC',
+    extension: '.aac',
     bitrate: { initial: '192', min: '32', max: '256', step: '32' },
-    keepVideo: true,
-    options: ({ isKeepVideo, downmixToStereo }, bitrate) =>
-      ({ codec: 'AAC', bitrateSliderValue: bitrate, isKeepVideo, downmixToStereo }),
+    keepVideo: 'mp4',
+    args: (_, bitrate) => ['-c:a', 'aac', '-b:a', `${bitrate}k`],
     Panel: ({ bitrate }) => <BitrateSlider {...bitrate!} />,
   },
   AC3: {
     label: 'AC3 (Dolby Digital)',
-    keepVideo: true,
-    options: ({ ac3Bitrate, isKeepVideo, downmixToStereo }) =>
-      ({ codec: 'AC3', ac3Bitrate, isKeepVideo, downmixToStereo }),
+    extension: '.ac3',
+    keepVideo: 'mp4',
+    args: ({ ac3Bitrate }) => ['-c:a', 'ac3', '-b:a', `${ac3Bitrate}k`],
     Panel: ({ settings, onChange }) =>
       <AC3 onAc3BitrateChange={onChange('ac3Bitrate')} ac3Bitrate={settings.ac3Bitrate} />,
   },
   ALAC: {
     label: 'ALAC (.m4a)',
-    keepVideo: true,
-    options: ({ isKeepVideo, downmixToStereo }) => ({ codec: 'ALAC', isKeepVideo, downmixToStereo }),
+    extension: '.m4a',
+    keepVideo: 'mp4',
+    args: () => ['-c:a', 'alac'],
     Panel: () => <NoSettingsApplicable />,
   },
   CAF: {
     label: 'CAF (.caf)',
-    keepVideo: false,
-    options: ({ downmixToStereo }) => ({ codec: 'CAF', downmixToStereo }),
+    extension: '.caf',
+    args: () => ['-c:a', 'alac'],
     Panel: () => <NoSettingsApplicable />,
   },
   DTS: {
     label: 'DTS (.dts)',
+    extension: '.dts',
     bitrate: { initial: '768', min: '384', max: '1536', step: '128' },
-    keepVideo: true,
-    options: ({ isKeepVideo, downmixToStereo }, bitrate) =>
-      ({ codec: 'DTS', bitrateSliderValue: bitrate, isKeepVideo, downmixToStereo }),
+    keepVideo: 'mkv',
+    args: (_, bitrate) => ['-c:a', 'dca', '-b:a', `${bitrate}k`, '-strict', '-2'],
     Panel: ({ bitrate }) => <DTS bitrate={bitrate!} />,
   },
   FLAC: {
     label: 'FLAC (.flac)',
-    keepVideo: true,
-    options: ({ flacCompression, isKeepVideo, downmixToStereo }) =>
-      ({ codec: 'FLAC', flacCompression, isKeepVideo, downmixToStereo }),
+    extension: '.flac',
+    keepVideo: 'mkv',
+    args: ({ isKeepVideo, flacCompression }) => [
+      ...(isKeepVideo ? ['-map', '0', '-c:s', 'copy'] : []),
+      '-map', '0:a', '-c:a', 'flac', '-compression_level', flacCompression,
+    ],
     Panel: ({ settings, onChange }) =>
       <FLAC onFlacCompressionChange={onChange('flacCompression')} flacCompression={settings.flacCompression} />,
   },
   MKA: {
     label: 'MKA (.mka)',
-    keepVideo: false,
-    options: ({ downmixToStereo }) => ({ codec: 'MKA', downmixToStereo }),
+    extension: '.mka',
+    args: () => ['-map', '0:a', '-c:a', 'copy'],
     Panel: () => <NoSettingsApplicable />,
   },
   MP3: {
     label: 'MP3 (.mp3)',
+    extension: '.mp3',
     bitrate: { initial: '192', min: '64', max: '320', step: '64' },
-    keepVideo: true,
-    options: ({ isKeepVideo, mp3EncodingType, mp3VbrSetting, downmixToStereo }, bitrate) =>
-      ({ codec: 'MP3', bitrateSliderValue: bitrate, isKeepVideo, mp3EncodingType, mp3VbrSetting, downmixToStereo }),
+    keepVideo: 'mp4',
+    args: ({ mp3EncodingType, mp3VbrSetting }, bitrate) => ['-c:a', 'libmp3lame',
+      ...(mp3EncodingType === 'cbr' ? ['-b:a', `${bitrate}k`]
+        : mp3EncodingType === 'abr' ? ['-abr', '1', '-b:a', `${bitrate}k`]
+        : ['-q:a', mp3VbrSetting]),
+    ],
     Panel: ({ settings, onChange, bitrate }) => (
       <MP3EncodingTypeSelector
         onEncodingTypeChange={onChange('mp3EncodingType')}
@@ -130,20 +143,20 @@ export const FORMATS: Record<Codec, Format> = {
   },
   Opus: {
     label: 'Opus (.opus)',
+    extension: '.opus',
     bitrate: { initial: '192', min: '16', max: '512', step: '16' },
-    keepVideo: false,
-    options: ({ opusEncodingType, downmixToStereo }, bitrate) =>
-      ({ codec: 'Opus', bitrateSliderValue: bitrate, opusEncodingType, downmixToStereo }),
+    args: ({ opusEncodingType }, bitrate) =>
+      ['-c:a', 'libopus', ...(opusEncodingType === 'cbr' ? ['-vbr', 'off'] : []), '-b:a', `${bitrate}k`],
     Panel: ({ settings, onChange, bitrate }) => (
       <Opus onOpusEncodingTypeChange={onChange('opusEncodingType')} encodingType={settings.opusEncodingType} bitrate={bitrate!} />
     ),
   },
   Vorbis: {
     label: 'Vorbis (.ogg)',
+    extension: '.ogg',
     bitrate: { initial: '192', min: '32', max: '480', step: '32' },
-    keepVideo: false,
-    options: ({ qValue, vorbisEncodingType, downmixToStereo }, bitrate) =>
-      ({ codec: 'Vorbis', bitrateSliderValue: bitrate, qValue, vorbisEncodingType, downmixToStereo }),
+    args: ({ vorbisEncodingType, qValue }, bitrate) => ['-map', '0:a', '-c:a', 'libvorbis',
+      ...(vorbisEncodingType === 'abr' ? ['-b:a', `${bitrate}k`] : ['-q:a', qValue])],
     Panel: ({ settings, onChange, bitrate }) => (
       <VorbisEncodingType
         onVorbisEncodingTypeChange={onChange('vorbisEncodingType')}
@@ -156,9 +169,13 @@ export const FORMATS: Record<Codec, Format> = {
   },
   WAV: {
     label: 'WAV (.wav)',
-    keepVideo: false,
-    options: ({ wavBitDepth, downmixToStereo }) => ({ codec: 'WAV', wavBitDepth, downmixToStereo }),
+    extension: '.wav',
+    args: ({ wavBitDepth }) => ['-c:a', `pcm_s${wavBitDepth}le`],
     Panel: ({ settings, onChange }) =>
       <WavBitDepthSelector onBitDepthChange={onChange('wavBitDepth')} bitDepth={settings.wavBitDepth} />,
   },
 };
+
+/** The bitrate slider's value for a format: the user's choice, else the format's default. */
+export const bitrateFor = (codec: Codec, settings: FormatSettings): string =>
+  settings.bitrates[codec] ?? FORMATS[codec].bitrate?.initial ?? '';

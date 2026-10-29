@@ -19,6 +19,8 @@ beforeEach(() => {
   vi.mocked(loadFFmpeg).mockReset().mockResolvedValue(undefined);
 });
 afterEach(cleanup);
+/** The job passed to the nth convertFile call (the latest by default). */
+const job = (call = -1) => vi.mocked(convertFile).mock.calls.at(call)![1];
 
 it('terminates each effect-owned worker on StrictMode cleanup and unmount, not rerender', () => {
   const view = render(<StrictMode><Homepage /></StrictMode>);
@@ -39,29 +41,26 @@ it('cancels, replaces the worker on restart, and ignores old callbacks/finalizer
     target: { files: [new File(['audio'], 'input.wav')] },
   });
   fireEvent.click(view.getByRole('button', { name: /^convert/i }));
-  const old = vi.mocked(convertFile).mock.calls[0];
-  expect(old[8]!()).toBe(true);
+  const old = job(0);
+  expect(old.isActive()).toBe(true);
   fireEvent.click(view.getByRole('button', { name: 'Cancel' }));
   expect(instances[0].terminate).toHaveBeenCalledOnce();
-  expect(old[8]!()).toBe(false);
+  expect(old.isActive()).toBe(false);
   fireEvent.click(view.getByRole('button', { name: /^convert/i }));
   expect(instances).toHaveLength(2);
-  const current = vi.mocked(convertFile).mock.calls[1];
+  const current = job(1);
   act(() => {
-    old[9]!.status({ stage: 'Stale progress' });
-    old[9]!.log('stale log');
-    current[9]!.status({ stage: 'Converting', percent: 25 });
-    current[9]!.log('x'.repeat(100_100));
+    current.onStatus({ stage: 'Converting', percent: 25 });
+    current.onLog('x'.repeat(100_100));
   });
   await act(async () => endings[0]());
-  expect(current[8]!()).toBe(true);
+  expect(current.isActive()).toBe(true);
   expect(view.getByRole('status').textContent).toContain('25.0%');
-  expect(view.getByRole('status').textContent).not.toContain('Stale');
   expect(view.getByLabelText('Operation logs').textContent).toHaveLength(100_000);
   expect(view.getByRole('button', { name: 'Cancel' })).toBeTruthy();
   view.unmount();
   expect(instances[1].terminate).toHaveBeenCalledOnce();
-  expect(current[8]!()).toBe(false);
+  expect(current.isActive()).toBe(false);
   await act(async () => endings[1]());
 });
 
@@ -71,12 +70,12 @@ it('passes the selected MP3 stereo downmix setting into conversion arguments', (
   fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [file] } });
   fireEvent.click(view.container.querySelector('input[name="downmix"][value="yes"]')!);
   fireEvent.click(view.getByRole('button', { name: /convert/i }));
-  expect(convertFile).toHaveBeenCalledWith(
-    expect.anything(), file,
-    ['-i', 'input.wav', '-c:a', 'libmp3lame', '-b:a', '192k', '-ac', '2', 'input.mp3'],
-    'input.wav', 'input.mp3',
-    expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Object),
-  );
+  expect(job()).toMatchObject({
+    file,
+    ffmpegArgs: ['-i', 'input.wav', '-c:a', 'libmp3lame', '-b:a', '192k', '-ac', '2', 'input.mp3'],
+    outputFilename: 'input.mp3',
+    knownTimeline: true,
+  });
   view.unmount();
 });
 
@@ -92,11 +91,12 @@ const startManual = (command: string) => {
 
 it('passes quoted manual-mode arguments through intact', () => {
   const { view, file } = startManual('-metadata  title="My Song" "my output.mp3"');
-  expect(convertFile).toHaveBeenCalledWith(
-    expect.anything(), file, ['-i', 'input.wav', '-metadata', 'title=My Song', 'my output.mp3'],
-    'input.wav', 'my output.mp3',
-    expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Object),
-  );
+  expect(job()).toMatchObject({
+    file,
+    ffmpegArgs: ['-i', 'input.wav', '-metadata', 'title=My Song', 'my output.mp3'],
+    outputFilename: 'my output.mp3',
+    knownTimeline: false,
+  });
   view.unmount();
 });
 
@@ -114,11 +114,11 @@ it('limits video encoder threads right after the input, outside Firefox only', (
   const userAgent = vi.spyOn(navigator, 'userAgent', 'get');
   userAgent.mockReturnValue('Mozilla/5.0 Chrome/130.0');
   let { view } = startManual('-c:v libx264 out.mp4 -y');
-  expect(vi.mocked(convertFile).mock.calls[0][2]).toEqual(['-i', 'input.wav', '-threads', '4', '-c:v', 'libx264', 'out.mp4', '-y']);
+  expect(job(0).ffmpegArgs).toEqual(['-i', 'input.wav', '-threads', '4', '-c:v', 'libx264', 'out.mp4', '-y']);
   view.unmount();
   userAgent.mockReturnValue('Mozilla/5.0 Firefox/130.0');
   ({ view } = startManual('-vcodec libx264 out.mp4'));
-  expect(vi.mocked(convertFile).mock.calls[1][2]).toEqual(['-i', 'input.wav', '-vcodec', 'libx264', 'out.mp4']);
+  expect(job(1).ffmpegArgs).toEqual(['-i', 'input.wav', '-vcodec', 'libx264', 'out.mp4']);
   view.unmount();
   userAgent.mockRestore();
 });
@@ -130,7 +130,7 @@ it('uses each format\'s own default bitrate and remembers changes per format', (
   const slider = () => view.container.querySelector<HTMLInputElement>('#bitrate_slider')!;
   const convert = () => {
     fireEvent.click(view.getByRole('button', { name: /^convert/i }));
-    const args = vi.mocked(convertFile).mock.calls.at(-1)![2];
+    const args = job().ffmpegArgs;
     return args[args.indexOf('-b:a') + 1];
   };
   fireEvent.change(select, { target: { value: 'DTS' } });
@@ -164,7 +164,6 @@ const selectFile = (view: ReturnType<typeof render>, name: string) => {
   fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [file] } });
   return file;
 };
-const lastArgs = () => vi.mocked(convertFile).mock.calls.at(-1)!;
 
 it.each([
   ['AAC', 'aac'], ['AC3', 'ac3'], ['ALAC', 'alac'], ['CAF', 'alac'], ['DTS', 'dca'], ['FLAC', 'flac'],
@@ -174,7 +173,7 @@ it.each([
   selectFile(view, 'input.wav');
   fireEvent.change(view.container.querySelector('#codecs')!, { target: { value: codec } });
   fireEvent.click(view.getByRole('button', { name: /^convert/i }));
-  const args = lastArgs()[2];
+  const args = job().ffmpegArgs;
   expect(args[args.indexOf('-c:a') + 1]).toBe(encoder);
   view.unmount();
 });
@@ -185,7 +184,7 @@ it('offers keeping the video for AAC', () => {
   fireEvent.change(view.container.querySelector('#codecs')!, { target: { value: 'AAC' } });
   fireEvent.click(view.getByLabelText('Keep the video (if applicable)'));
   fireEvent.click(view.getByRole('button', { name: /^convert/i }));
-  expect(lastArgs()[2]).toEqual(['-i', 'clip.mp4', '-c:V', 'copy', '-c:a', 'aac', '-b:a', '192k', 'clip.mp4']);
+  expect(job().ffmpegArgs).toEqual(['-i', 'clip.mp4', '-c:V', 'copy', '-c:a', 'aac', '-b:a', '192k', 'clip.mp4']);
   view.unmount();
 });
 
@@ -196,7 +195,7 @@ it('prefills an editable output name and requires one', () => {
   expect(outputName.value).toBe('no-extension');
   fireEvent.change(outputName, { target: { value: '  renamed  ' } });
   fireEvent.click(view.getByRole('button', { name: /^convert/i }));
-  expect(lastArgs()[4]).toBe('renamed.mp3');
+  expect(job().outputFilename).toBe('renamed.mp3');
   fireEvent.click(view.getByRole('button', { name: 'Cancel' }));
   fireEvent.change(outputName, { target: { value: ' ' } });
   fireEvent.click(view.getByRole('button', { name: /^convert/i }));

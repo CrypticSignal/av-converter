@@ -6,9 +6,8 @@ import type { OperationProgress } from '../utils/progress';
 import Button from '@mui/material/Button';
 import { createFFmpegArgs } from '../utils/createFFmpegArgs';
 import { parseArgs } from '../utils/parseArgs';
-import { DEFAULT_SETTINGS, FORMATS, type Codec, type FormatSettings, type StringSetting } from '../formats';
+import { DEFAULT_SETTINGS, FORMATS, bitrateFor, type Codec, type FormatSettings, type StringSetting } from '../formats';
 // General Components
-import ConvertButton from '../components/ConvertButton';
 import FileInput from '../components/FileInput';
 import FormatSelector from '../components/FormatSelector';
 import IsKeepVideo from '../components/IsKeepVideo';
@@ -23,14 +22,29 @@ import Divider from '@mui/material/Divider';
 const withoutExtension = (filename: string) =>
   filename.includes('.') ? filename.slice(0, filename.lastIndexOf('.')) : filename;
 
+/** Build the arguments for manual mode, where the user types everything after `ffmpeg -i <input>`. */
+const manualCommandArgs = (inputFilename: string, command: string) => {
+  const restOfArgs = parseArgs(command);
+  if (restOfArgs.length === 0) throw new Error('Please enter the rest of the command.');
+
+  // https://github.com/ffmpegwasm/ffmpeg.wasm/issues/597
+  // Directly after the input, -threads is always an option of the first output,
+  // whatever the user's command ends with.
+  const encodesVideo = restOfArgs.some(arg => ['-c:v', '-c:V', '-codec:v', '-vcodec'].includes(arg));
+  const threads = encodesVideo && !navigator.userAgent.toLowerCase().includes('firefox') ? ['-threads', '4'] : [];
+
+  const ffmpegArgs = ['-i', inputFilename, ...threads, ...restOfArgs];
+  const outputFilename = ffmpegArgs[ffmpegArgs.length - 1];
+  if (!outputFilename) throw new Error('Could not parse output filename from command.');
+  return { ffmpegArgs, outputFilename };
+};
+
 const Homepage = (): React.JSX.Element => {
-  const [alertMessage, setAlertMessage] = useState('');
-  const [alertSeverity, setAlertSeverity] = useState<AlertColor>('info');
+  const [alert, setAlert] = useState<{ severity: AlertColor; message: string } | null>(null);
   const [codec, setCodec] = useState<Codec>('MP3');
   const [settings, setSettings] = useState<FormatSettings>(DEFAULT_SETTINGS);
   const [ffmpegCommand, setFfmpegCommand] = useState('');
   const [file, setFile] = useState<File | undefined>(undefined);
-  const [inputFilename, setInputFilename] = useState('');
   const [outputName, setOutputName] = useState('');
   const [isConverting, setIsConverting] = useState(false);
   const [manualCommandInput, setManualCommandInput] = useState('');
@@ -38,8 +52,24 @@ const Homepage = (): React.JSX.Element => {
   // Conversion progress.
   const [status, setStatus] = useState<OperationProgress>({ stage: 'Ready' });
   const [logs, setLogs] = useState('');
+  // The FFmpeg worker, and a token for the running conversion. Callbacks from a
+  // conversion are ignored once either is replaced (on cancel or unmount).
+  const ffmpegRef = useRef<FFmpeg | null>(null);
   const session = useRef<object | null>(null);
 
+  const stopWorker = () => {
+    session.current = null;
+    const current = ffmpegRef.current;
+    ffmpegRef.current = null;
+    current?.terminate();
+  };
+
+  useEffect(() => {
+    ffmpegRef.current = new FFmpeg();
+    return stopWorker;
+  }, []);
+
+  const inputFilename = file?.name ?? '';
   const format = FORMATS[codec];
   const update = <K extends keyof FormatSettings>(key: K, value: FormatSettings[K]) =>
     setSettings(previous => ({ ...previous, [key]: value }));
@@ -52,101 +82,52 @@ const Homepage = (): React.JSX.Element => {
     min: format.bitrate.min,
     max: format.bitrate.max,
     step: format.bitrate.step,
-    value: settings.bitrates[codec] ?? format.bitrate.initial,
+    value: bitrateFor(codec, settings),
     onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
       update('bitrates', { ...settings.bitrates, [codec]: e.currentTarget.value }),
   };
 
   const onFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.currentTarget.files && e.currentTarget.files[0]) {
-      const currentFile = e.currentTarget.files[0];
-      setFile(currentFile);
-      // Fetch the ~30 MB core while the user picks settings. Failures are retried on convert.
-      const instance = ffmpegRef.current;
-      if (instance) void loadFFmpeg(instance, () => ffmpegRef.current === instance).catch(() => {});
-      setInputFilename(currentFile.name);
-      setOutputName(withoutExtension(currentFile.name));
-    } else {
-      setInputFilename('');
-      setFile(undefined);
-    }
+    const currentFile = e.currentTarget.files?.[0];
+    setFile(currentFile);
+    if (!currentFile) return;
+    setOutputName(withoutExtension(currentFile.name));
+    // Fetch the ~30 MB core while the user picks settings. Failures are retried on convert.
+    const instance = ffmpegRef.current;
+    if (instance) void loadFFmpeg(instance, () => ffmpegRef.current === instance).catch(() => {});
   };
 
-  const ffmpegRef = useRef<FFmpeg | null>(null);
-  useEffect(() => {
-    const instance = new FFmpeg();
-    ffmpegRef.current = instance;
-    return () => {
-      session.current = null;
-      const current = ffmpegRef.current;
-      ffmpegRef.current = null;
-      current?.terminate();
-    };
-  }, []);
-
   const cancel = () => {
-    session.current = null;
-    const current = ffmpegRef.current;
-    ffmpegRef.current = null;
-    current?.terminate();
+    stopWorker();
     setIsConverting(false);
-    setAlertMessage('Conversion cancelled.');
-    setAlertSeverity('info');
+    setAlert({ severity: 'info', message: 'Conversion cancelled.' });
     setStatus({ stage: 'Cancelled' });
   };
 
   const onConvertClicked = () => {
     if (session.current) return;
     if (file === undefined) {
-      setAlertSeverity('error');
-      setAlertMessage('You must select an input file.');
+      setAlert({ severity: 'error', message: 'You must select an input file.' });
+      return;
+    }
+    if (!manualMode && !outputName.trim()) {
+      setAlert({ severity: 'error', message: 'Please enter an output filename.' });
       return;
     }
 
     console.clear();
-    setAlertMessage('');
+    setAlert(null);
     setFfmpegCommand('');
 
     let ffmpegArgs: string[];
-    let outputFilename = '';
-
-    if (manualMode) {
-      let restOfArgs: string[];
-      try {
-        restOfArgs = parseArgs(manualCommandInput);
-      } catch (error) {
-        setAlertSeverity('error');
-        setAlertMessage((error as Error).message);
-        return;
-      }
-
-      if (restOfArgs.length === 0) {
-        setAlertSeverity('error');
-        setAlertMessage('Please enter the rest of the command.');
-        return;
-      }
-
-      // https://github.com/ffmpegwasm/ffmpeg.wasm/issues/597
-      // Directly after the input, -threads is always an option of the first output,
-      // whatever the user's command ends with.
-      const encodesVideo = restOfArgs.some(arg => ['-c:v', '-c:V', '-codec:v', '-vcodec'].includes(arg));
-      const threads = encodesVideo && !navigator.userAgent.toLowerCase().includes('firefox') ? ['-threads', '4'] : [];
-
-      ffmpegArgs = ['-i', inputFilename, ...threads, ...restOfArgs];
-      outputFilename = ffmpegArgs[ffmpegArgs.length - 1];
-      if (!outputFilename) {
-        setAlertSeverity('error');
-        setAlertMessage('Could not parse output filename from command.');
-        return;
-      }
-    } else {
-      if (!outputName.trim()) {
-        setAlertSeverity('error');
-        setAlertMessage('Please enter an output filename.');
-        return;
-      }
-      const options = format.options(settings, bitrate?.value ?? '');
-      ({ ffmpegArgs, outputFilename } = createFFmpegArgs(inputFilename, options, outputName.trim()));
+    let outputFilename: string;
+    try {
+      ({ ffmpegArgs, outputFilename } = manualMode
+        ? manualCommandArgs(file.name, manualCommandInput)
+        : createFFmpegArgs(file.name, codec, settings, outputName.trim()));
+    } catch (error) {
+      setAlert({ severity: 'error', message: (error as Error).message });
+      return;
     }
 
     setFfmpegCommand(`ffmpeg ${ffmpegArgs.join(' ')}`);
@@ -154,14 +135,23 @@ const Homepage = (): React.JSX.Element => {
     ffmpegRef.current = ffmpeg;
     const currentSession = {};
     session.current = currentSession;
-    const active = () => session.current === currentSession && ffmpegRef.current === ffmpeg;
+    const isActive = () => session.current === currentSession && ffmpegRef.current === ffmpeg;
     setLogs('');
     setIsConverting(true);
-    void convertFile(ffmpeg, file, ffmpegArgs, inputFilename, outputFilename, setAlertMessage, setAlertSeverity, setIsConverting,
-      active, { status: value => { if (active()) setStatus(value); },
-        log: message => { if (active()) setLogs(previous => (previous + message + '\n').slice(-100_000)); },
-        knownTimeline: !manualMode,
-      }).finally(() => { if (active()) session.current = null; });
+    void convertFile(ffmpeg, {
+      file,
+      ffmpegArgs,
+      outputFilename,
+      knownTimeline: !manualMode,
+      isActive,
+      onAlert: (severity, message) => setAlert({ severity, message }),
+      onStatus: setStatus,
+      onLog: message => setLogs(previous => (previous + message + '\n').slice(-100_000)),
+    }).finally(() => {
+      if (!isActive()) return;
+      session.current = null;
+      setIsConverting(false);
+    });
   };
 
   return (
@@ -287,10 +277,10 @@ const Homepage = (): React.JSX.Element => {
 
       <OperationStatus progress={status} busy={isConverting} logs={logs} />
       {isConverting && <Button onClick={cancel}>Cancel</Button>}
-      {alertMessage && <div className="w-full max-w-xs mx-auto"><Alert severity={alertSeverity} sx={{ textAlign: 'center', my: 2, display: 'flex', justifyContent: 'center' }}>{alertMessage}</Alert></div>}
+      {alert && <div className="w-full max-w-xs mx-auto"><Alert severity={alert.severity} sx={{ textAlign: 'center', my: 2, display: 'flex', justifyContent: 'center' }}>{alert.message}</Alert></div>}
 
       <div className={`mt-4 ${!isConverting ? 'block' : 'hidden'}`}>
-        <ConvertButton onConvertClicked={onConvertClicked} />
+        <Button variant="contained" onClick={onConvertClicked}>Convert</Button>
       </div>
     </>
   );

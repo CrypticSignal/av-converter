@@ -16,10 +16,8 @@ const Flac: React.FC<FlacProps> = ({ onFlacCompressionChange, flacCompression })
         min={0}
         max={12}
         step={1}
-        defaultValue={5}
         value={flacCompression}
       />
-      <span id="flac_value" />
       {` ${flacCompression}`}
       <br />
       <i>A higher value means a slighter smaller file size, but a longer conversion time.</i>

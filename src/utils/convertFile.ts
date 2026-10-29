@@ -1,7 +1,6 @@
 import type { FFFSType, FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
-import { Dispatch, SetStateAction } from 'react';
-import { AlertColor } from '@mui/material';
+import type { AlertColor } from '@mui/material';
 import { nonnegative, OperationProgress } from './progress';
 
 const loads = new WeakMap<FFmpeg, Promise<void>>();
@@ -37,37 +36,42 @@ export const loadFFmpeg = (ffmpeg: FFmpeg, isActive = () => true): Promise<void>
   return load;
 };
 
-export const convertFile = async (
-  ffmpeg: FFmpeg,
-  file: File,
-  ffmpegArgs: string[],
-  inputFilename: string,
-  outputFilename: string,
-  setAlertMessage: Dispatch<SetStateAction<string>>,
-  setAlertSeverity: Dispatch<SetStateAction<AlertColor>>,
-  setIsConverting: Dispatch<SetStateAction<boolean>>,
-  isActive = () => true,
-  observe?: { status: (value: OperationProgress) => void; log: (message: string) => void; knownTimeline: boolean },
-) => {
+export interface ConversionJob {
+  file: File;
+  /** Arguments that read the input as `-i <file.name>`. */
+  ffmpegArgs: string[];
+  outputFilename: string;
+  /** False when the arguments may change the output's duration, so a percentage would mislead. */
+  knownTimeline: boolean;
+  /** Turns false once the job is cancelled or the page unmounts; nothing is reported after that. */
+  isActive: () => boolean;
+  onAlert: (severity: AlertColor, message: string) => void;
+  onStatus: (value: OperationProgress) => void;
+  onLog: (message: string) => void;
+}
+
+export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
+  const { file, ffmpegArgs, outputFilename, knownTimeline, isActive, onAlert, onStatus, onLog } = job;
+  const inputFilename = file.name;
   let duration: number | undefined;
   let started: number | undefined;
   // FFmpeg's first error line is usually the root cause; later ones are consequences.
   let firstError: string | undefined;
-  const report = (value: OperationProgress) => { if (isActive()) observe?.status(value); };
+  const report = (value: OperationProgress) => { if (isActive()) onStatus(value); };
   const checkActive = () => { if (!isActive()) throw new Error('Page unmounted'); };
-  const onLog = ({ message }: { message: string }) => {
+  const handleLog = ({ message }: { message: string }) => {
     if (!isActive()) return;
-    observe?.log(message);
+    onLog(message);
     if (firstError === undefined && message !== 'Conversion failed!' && ERROR_PATTERN.test(message)) {
       firstError = message.trim().slice(0, 300);
     }
     const match = message.match(/Duration: (\d+):(\d+):(\d+(?:\.\d+)?)/);
-    if (observe?.knownTimeline && match) {
+    if (knownTimeline && match) {
       const seconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
       if (seconds > 0) duration = seconds;
     }
   };
-  const onProgress = ({ time }: { progress: number; time?: number }) => {
+  const handleProgress = ({ time }: { progress: number; time?: number }) => {
     if (!isActive() || started === undefined) return;
     const elapsed = (performance.now() - started) / 1000;
     const seconds = nonnegative(time) ? time / 1_000_000 : undefined;
@@ -84,14 +88,12 @@ export const convertFile = async (
   const inputPath = `${INPUT_DIR}/${inputFilename}`;
   try {
     checkActive();
-    setIsConverting(true);
-    setAlertSeverity('info');
-    setAlertMessage('Loading @ffmpeg/core-mt...');
+    onAlert('info', 'Loading @ffmpeg/core-mt...');
     report({ stage: 'Loading FFmpeg' });
     await loadFFmpeg(ffmpeg, isActive);
     checkActive();
-    ffmpeg.on('log', onLog);
-    ffmpeg.on('progress', onProgress);
+    ffmpeg.on('log', handleLog);
+    ffmpeg.on('progress', handleProgress);
     filesTouched = true;
     // Never allow a failed execution to download a previous conversion's output.
     await ffmpeg.deleteFile(outputFilename).catch(() => {});
@@ -113,7 +115,7 @@ export const convertFile = async (
     const args = ffmpegArgs.map((arg, i) => ffmpegArgs[i - 1] === '-i' && arg === inputFilename ? inputPath : arg);
     started = performance.now();
     report({ stage: 'Converting' });
-    setAlertMessage('Converting');
+    onAlert('info', 'Converting');
     const exitCode = await ffmpeg.exec(args);
     checkActive();
     if (exitCode !== 0) throw new Error(`FFmpeg exited with code ${exitCode}`);
@@ -129,20 +131,18 @@ export const convertFile = async (
     } finally {
       setTimeout(() => URL.revokeObjectURL(objectURL), 100);
     }
-    setAlertSeverity('success');
-    setAlertMessage('Done! The converted file should have started downloading.');
+    onAlert('success', 'Done! The converted file should have started downloading.');
     report({ stage: 'Conversion complete' });
   } catch (error) {
     if (isActive()) {
       console.error(error);
-      setAlertSeverity('error');
       const detail = firstError ?? (error instanceof Error ? error.message : undefined);
-      setAlertMessage(detail ? `An error occurred during conversion: ${detail}` : 'An error occurred during conversion.');
+      onAlert('error', detail ? `An error occurred during conversion: ${detail}` : 'An error occurred during conversion.');
       report({ stage: 'Conversion failed' });
     }
   } finally {
-    ffmpeg.off('log', onLog);
-    ffmpeg.off('progress', onProgress);
+    ffmpeg.off('log', handleLog);
+    ffmpeg.off('progress', handleProgress);
     if (filesTouched && isActive()) {
       // Missing files and a terminated worker are expected cleanup cases.
       const cleanup = [() => ffmpeg.deleteFile(outputFilename)];
@@ -153,6 +153,5 @@ export const convertFile = async (
         try { await step(); } catch { /* best effort */ }
       }
     }
-    if (isActive()) setIsConverting(false);
   }
 };
