@@ -6,6 +6,7 @@ import OperationStatus from '../components/OperationStatus';
 import type { OperationProgress } from '../utils/progress';
 import Button from '@mui/material/Button';
 import { createFFmpegArgs, EncodingOptions } from '../utils/createFFmpegArgs';
+import { parseArgs } from '../utils/parseArgs';
 // General Components
 import BitrateSlider from '../components/BitrateSlider';
 import ConvertButton from '../components/ConvertButton';
@@ -165,12 +166,13 @@ const Homepage = (): JSX.Element => {
     let outputFilename = '';
 
     if (manualMode) {
-      const restOfArgs = manualCommandInput.trim().split(' ');
-      // https://github.com/ffmpegwasm/ffmpeg.wasm/issues/597
-      if (restOfArgs.includes('-c:v') || restOfArgs.includes('-c:V')) {
-        if (!navigator.userAgent.toLowerCase().includes('firefox')) {
-          restOfArgs.splice(-1, 0, "-threads", "4");
-        }
+      let restOfArgs: string[];
+      try {
+        restOfArgs = parseArgs(manualCommandInput);
+      } catch (error) {
+        setAlertSeverity('error');
+        setAlertMessage((error as Error).message);
+        return;
       }
 
       if (restOfArgs.length === 0) {
@@ -178,6 +180,13 @@ const Homepage = (): JSX.Element => {
         setAlertMessage('Please enter the rest of the command.');
         setIsConverting(false);
         return;
+      }
+
+      // https://github.com/ffmpegwasm/ffmpeg.wasm/issues/597
+      if (restOfArgs.includes('-c:v') || restOfArgs.includes('-c:V')) {
+        if (!navigator.userAgent.toLowerCase().includes('firefox')) {
+          restOfArgs.splice(-1, 0, "-threads", "4");
+        }
       }
 
       ffmpegArgs = ['-i', inputFilename, ...restOfArgs];

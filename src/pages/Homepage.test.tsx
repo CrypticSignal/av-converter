@@ -79,3 +79,33 @@ it('passes the selected MP3 stereo downmix setting into conversion arguments', (
   );
   view.unmount();
 });
+
+const startManual = (command: string) => {
+  const view = render(<Homepage />);
+  const file = new File(['audio'], 'input.wav');
+  fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+  fireEvent.click(view.getByLabelText('Manual FFmpeg Command'));
+  fireEvent.change(view.getByPlaceholderText('-c:v libx264 output.mp4'), { target: { value: command } });
+  fireEvent.click(view.getByRole('button', { name: /^convert/i }));
+  return { view, file };
+};
+
+it('passes quoted manual-mode arguments through intact', () => {
+  const { view, file } = startManual('-metadata  title="My Song" "my output.mp3"');
+  expect(convertFile).toHaveBeenCalledWith(
+    expect.anything(), file, ['-i', 'input.wav', '-metadata', 'title=My Song', 'my output.mp3'],
+    'input.wav', 'my output.mp3',
+    expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Object),
+  );
+  view.unmount();
+});
+
+it.each([
+  ['   ', 'Please enter the rest of the command.'],
+  ['-metadata title="My Song out.mp3', 'Unterminated " quote in command.'],
+])('rejects the manual command %j', (command, message) => {
+  const { view } = startManual(command);
+  expect(convertFile).not.toHaveBeenCalled();
+  expect(view.getByRole('alert').textContent).toContain(message);
+  view.unmount();
+});
