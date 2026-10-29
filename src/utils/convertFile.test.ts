@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
-import { convertFile, loadFFmpeg } from './convertFile';
+import { convertFile, loadFFmpeg, type ConversionJob } from './convertFile';
 
 vi.mock('@ffmpeg/util', () => ({ fetchFile: vi.fn(), toBlobURL: vi.fn() }));
 
@@ -24,11 +24,14 @@ const worker = () => ({
 });
 type Worker = ReturnType<typeof worker>;
 const asFFmpeg = (w: Worker) => w as unknown as FFmpeg;
-const run = (w: Worker, active = () => true) => {
-  const setters = [vi.fn(), vi.fn(), vi.fn()] as const;
-  const promise = convertFile(asFFmpeg(w), new File(['input'], 'in.wav'),
-    ['-i', 'in.wav', 'out.wav'], 'in.wav', 'out.wav', ...setters, active);
-  return { promise, setters };
+const run = (w: Worker, isActive = () => true, overrides: Partial<ConversionJob> = {}) => {
+  const callbacks = [vi.fn(), vi.fn(), vi.fn()] as const;
+  const [onAlert, onStatus, onLog] = callbacks;
+  const promise = convertFile(asFFmpeg(w), {
+    file: new File(['input'], 'in.wav'), ffmpegArgs: ['-i', 'in.wav', 'out.wav'], outputFilename: 'out.wav',
+    knownTimeline: true, isActive, onAlert, onStatus, onLog, ...overrides,
+  });
+  return { promise, callbacks };
 };
 
 beforeEach(() => {
@@ -75,12 +78,12 @@ describe('FFmpeg loading', () => {
     let active = true;
     const job = run(w, () => active);
     active = false;
-    const calls = job.setters.map(s => s.mock.calls.length);
+    const calls = job.callbacks.map(s => s.mock.calls.length);
     blob.resolve('blob:late');
     await job.promise;
     expect(w.load).not.toHaveBeenCalled();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:late');
-    expect(job.setters.map(s => s.mock.calls.length)).toEqual(calls);
+    expect(job.callbacks.map(s => s.mock.calls.length)).toEqual(calls);
   });
 });
 
@@ -98,11 +101,11 @@ describe('conversion cleanup', () => {
     next.exec.mockReturnValue(running.promise);
     const second = run(next);
     await vi.waitFor(() => expect(next.exec).toHaveBeenCalled());
-    const calls = second.setters.map(s => s.mock.calls.length);
+    const calls = second.callbacks.map(s => s.mock.calls.length);
     cleaning.resolve(true);
     await first.promise;
     expect(old.deleteFile.mock.calls).toEqual([['out.wav'], ['out.wav']]);
-    expect(second.setters.map(s => s.mock.calls.length)).toEqual(calls);
+    expect(second.callbacks.map(s => s.mock.calls.length)).toEqual(calls);
     running.resolve(0);
     await second.promise;
   });
@@ -122,11 +125,11 @@ describe('conversion cleanup', () => {
     const target = phase === 'load' ? w.load : phase === 'mount' ? w.mount : phase === 'fetch' ? fetchFile : phase === 'write' ? w.writeFile : phase === 'exec' ? w.exec : w.readFile;
     await vi.waitFor(() => expect(target).toHaveBeenCalled());
     active = false;
-    const setterCalls = job.setters.map(s => s.mock.calls.length);
+    const setterCalls = job.callbacks.map(s => s.mock.calls.length);
     const deleteCalls = w.deleteFile.mock.calls.length;
     pending.resolve(phase === 'read' || phase === 'fetch' ? new Uint8Array([1]) : phase === 'mount' ? true : 0);
     await job.promise;
-    expect(job.setters.map(s => s.mock.calls.length)).toEqual(setterCalls);
+    expect(job.callbacks.map(s => s.mock.calls.length)).toEqual(setterCalls);
     expect(w.deleteFile).toHaveBeenCalledTimes(deleteCalls);
     expect(w.unmount).not.toHaveBeenCalled();
     expect(URL.createObjectURL).not.toHaveBeenCalled();
@@ -145,11 +148,11 @@ describe('conversion cleanup', () => {
     next.exec.mockReturnValue(nextExecution.promise);
     const second = run(next);
     await vi.waitFor(() => expect(next.exec).toHaveBeenCalled());
-    const calls = second.setters.map(s => s.mock.calls.length);
+    const calls = second.callbacks.map(s => s.mock.calls.length);
     execution.resolve(0);
     await first.promise;
     expect(next.deleteFile.mock.calls).toEqual([['out.wav']]);
-    expect(second.setters.map(s => s.mock.calls.length)).toEqual(calls);
+    expect(second.callbacks.map(s => s.mock.calls.length)).toEqual(calls);
     nextExecution.resolve(0);
     await second.promise;
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledOnce();
@@ -160,11 +163,7 @@ describe('conversion cleanup', () => {
     const execution = deferred<number>();
     w.exec.mockReturnValue(execution.promise);
     vi.spyOn(performance, 'now').mockReturnValue(1000);
-    const status = vi.fn();
-    const log = vi.fn();
-    const setters = [vi.fn(), vi.fn(), vi.fn()] as const;
-    const promise = convertFile(asFFmpeg(w), new File(['input'], 'in.wav'),
-      ['-i', 'in.wav', 'out.wav'], 'in.wav', 'out.wav', ...setters, () => true, { status, log, knownTimeline });
+    const { promise, callbacks: [, status, log] } = run(w, () => true, { knownTimeline });
     await vi.waitFor(() => expect(w.exec).toHaveBeenCalled());
     const onLog = w.on.mock.calls.find(call => call[0] === 'log')![1];
     const onProgress = w.on.mock.calls.find(call => call[0] === 'progress')![1];
@@ -223,7 +222,7 @@ describe('conversion cleanup', () => {
       expect(w.unmount).toHaveBeenCalledWith('/input');
     }
     expect(w.off).toHaveBeenCalledTimes(2);
-    expect(job.setters[2]).toHaveBeenLastCalledWith(false);
+    expect(job.callbacks[0]).toHaveBeenLastCalledWith('error', expect.stringContaining('An error occurred'));
   });
   it('ignores late events and completion after unmount, even if cleanup fails', async () => {
     const w = worker();
@@ -233,12 +232,12 @@ describe('conversion cleanup', () => {
     const job = run(w, () => active);
     await vi.waitFor(() => expect(w.exec).toHaveBeenCalled());
     active = false;
-    const calls = job.setters.map(s => s.mock.calls.length);
+    const calls = job.callbacks.map(s => s.mock.calls.length);
     for (const [event, callback] of w.on.mock.calls) callback(event === 'log' ? { message: 'late' } : { progress: 0.5 });
     w.deleteFile.mockRejectedValue(new Error('terminated'));
     execution.resolve(0);
     await job.promise;
-    expect(job.setters.map(s => s.mock.calls.length)).toEqual(calls);
+    expect(job.callbacks.map(s => s.mock.calls.length)).toEqual(calls);
     expect(w.readFile).not.toHaveBeenCalled();
     expect(w.off).toHaveBeenCalledTimes(2);
   });
@@ -259,8 +258,9 @@ describe('input mounting', () => {
 
 it('only redirects -i inputs, so an output may reuse the input name', async () => {
   const w = worker();
-  await convertFile(asFFmpeg(w), new File(['input'], 'clip.mp4'), ['-i', 'clip.mp4', '-c:V', 'copy', 'clip.mp4'],
-    'clip.mp4', 'clip.mp4', vi.fn(), vi.fn(), vi.fn());
+  await run(w, () => true, {
+    file: new File(['input'], 'clip.mp4'), ffmpegArgs: ['-i', 'clip.mp4', '-c:V', 'copy', 'clip.mp4'], outputFilename: 'clip.mp4',
+  }).promise;
   expect(w.exec).toHaveBeenCalledWith(['-i', '/input/clip.mp4', '-c:V', 'copy', 'clip.mp4']);
   expect(w.readFile).toHaveBeenCalledWith('clip.mp4');
   expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledOnce();
@@ -276,7 +276,7 @@ describe('error reporting', () => {
     });
     const job = run(w);
     await job.promise;
-    return job.setters[0].mock.calls.at(-1)![0];
+    return job.callbacks[0].mock.calls.at(-1)![1];
   };
 
   it('shows the first FFmpeg error line rather than its consequences', async () => {
@@ -295,6 +295,6 @@ describe('error reporting', () => {
     w.writeFile.mockRejectedValue(new Error('Out of memory'));
     const job = run(w);
     await job.promise;
-    expect(job.setters[0]).toHaveBeenLastCalledWith('An error occurred during conversion: Out of memory');
+    expect(job.callbacks[0]).toHaveBeenLastCalledWith('error', 'An error occurred during conversion: Out of memory');
   });
 });

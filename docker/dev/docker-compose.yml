@@ -47,9 +47,5 @@ services:
         - action: sync+restart
           path: ../../tsconfig.json
           target: /app/tsconfig.json
-          
-        - action: sync+restart
-          path: ../../tailwind.config.js
-          target: /app/tailwind.config.js
     ports:
       - 3000:3000
