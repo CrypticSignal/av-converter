@@ -183,13 +183,12 @@ const Homepage = (): JSX.Element => {
       }
 
       // https://github.com/ffmpegwasm/ffmpeg.wasm/issues/597
-      if (restOfArgs.includes('-c:v') || restOfArgs.includes('-c:V')) {
-        if (!navigator.userAgent.toLowerCase().includes('firefox')) {
-          restOfArgs.splice(-1, 0, "-threads", "4");
-        }
-      }
+      // Directly after the input, -threads is always an option of the first output,
+      // whatever the user's command ends with.
+      const encodesVideo = restOfArgs.some(arg => ['-c:v', '-c:V', '-codec:v', '-vcodec'].includes(arg));
+      const threads = encodesVideo && !navigator.userAgent.toLowerCase().includes('firefox') ? ['-threads', '4'] : [];
 
-      ffmpegArgs = ['-i', inputFilename, ...restOfArgs];
+      ffmpegArgs = ['-i', inputFilename, ...threads, ...restOfArgs];
       outputFilename = ffmpegArgs[ffmpegArgs.length - 1];
       
       if (!outputFilename) {

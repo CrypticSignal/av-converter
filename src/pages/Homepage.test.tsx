@@ -109,3 +109,16 @@ it.each([
   expect(view.getByRole('alert').textContent).toContain(message);
   view.unmount();
 });
+
+it('limits video encoder threads right after the input, outside Firefox only', () => {
+  const userAgent = vi.spyOn(navigator, 'userAgent', 'get');
+  userAgent.mockReturnValue('Mozilla/5.0 Chrome/130.0');
+  let { view } = startManual('-c:v libx264 out.mp4 -y');
+  expect(vi.mocked(convertFile).mock.calls[0][2]).toEqual(['-i', 'input.wav', '-threads', '4', '-c:v', 'libx264', 'out.mp4', '-y']);
+  view.unmount();
+  userAgent.mockReturnValue('Mozilla/5.0 Firefox/130.0');
+  ({ view } = startManual('-vcodec libx264 out.mp4'));
+  expect(vi.mocked(convertFile).mock.calls[1][2]).toEqual(['-i', 'input.wav', '-vcodec', 'libx264', 'out.mp4']);
+  view.unmount();
+  userAgent.mockRestore();
+});
