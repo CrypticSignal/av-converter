@@ -1,5 +1,4 @@
 import http.client
-import ipaddress
 from io import BytesIO, StringIO
 import json
 import socket
@@ -14,16 +13,13 @@ from unittest.mock import Mock, patch
 from urllib.parse import unquote, urlencode
 
 from server import (DOWNLOAD_FILES, DOWNLOAD_SLOTS, DownloadFiles, DownloadHandler,
-                    ThreadingHTTPServer, validate_url, StorageGuard, RateLimiter,
-                    client_identity, download_video, DownloadError)
+                    ThreadingHTTPServer, validate_url, StorageGuard,
+                    download_video, DownloadError)
 from server import run_monitored, read_metadata, DOWNLOAD_LINK_SECONDS
 
 
 class DownloadTests(unittest.TestCase):
     def setUp(self):
-        rate_patch = patch('server.RATE_LIMITER', RateLimiter())
-        rate_patch.start()
-        self.addCleanup(rate_patch.stop)
         storage_directory = tempfile.TemporaryDirectory()
         self.addCleanup(storage_directory.cleanup)
         guard = StorageGuard()
@@ -402,14 +398,6 @@ class DownloadTests(unittest.TestCase):
             DOWNLOAD_SLOTS.release()
             DOWNLOAD_SLOTS.release()
 
-    def test_rate_limit_rejects_before_extraction(self):
-        limiter = RateLimiter()
-        limiter.limit = 1
-        with patch('server.RATE_LIMITER', limiter), patch('server.download_video') as download:
-            self.assertEqual(self.request({'url': 'invalid'})[0], 400)
-            self.assertEqual(self.request()[0], 429)
-            download.assert_not_called()
-
     def test_storage_admission_releases_slot(self):
         with patch('server.STORAGE.check', side_effect=DownloadError('storage quota reached')), \
                 patch('server.download_video') as download, self.assertLogs('server'):
@@ -559,26 +547,6 @@ class ResourceTests(unittest.TestCase):
             with patch('server.shutil.disk_usage', return_value=Mock(free=99)):
                 with self.assertRaisesRegex(DownloadError, 'disk space'):
                     guard.check()
-
-    def test_rate_window_and_bounded_clients(self):
-        limiter = RateLimiter()
-        limiter.limit = 2
-        limiter.max_clients = 1
-        with patch('server.time.monotonic', return_value=0):
-            self.assertTrue(limiter.allow('one'))
-            self.assertTrue(limiter.allow('one'))
-            self.assertFalse(limiter.allow('one'))
-            self.assertFalse(limiter.allow('two'))
-        with patch('server.time.monotonic', return_value=limiter.window):
-            self.assertTrue(limiter.allow('two'))
-
-    def test_forwarding_requires_trusted_peer_and_chain(self):
-        with patch('server.TRUSTED_PROXY_NETWORKS', (ipaddress.ip_network('10.0.0.0/24'),)):
-            self.assertEqual(client_identity('192.0.2.1', '198.51.100.1'), '192.0.2.1')
-            self.assertEqual(client_identity('10.0.0.2', '198.51.100.1'), '198.51.100.1')
-            self.assertEqual(client_identity('10.0.0.2', '192.0.2.8, 198.51.100.1'), '198.51.100.1')
-            self.assertEqual(client_identity('10.0.0.2', '192.0.2.8, 10.0.0.3'), '192.0.2.8')
-            self.assertEqual(client_identity('10.0.0.2', 'invalid'), '10.0.0.2')
 
     def test_silent_media_is_stopped_on_storage_breach(self):
         released = threading.Event()

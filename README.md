@@ -72,7 +72,7 @@ Without Docker, use `downloader/cookies.txt`. Each request gets a temporary copy
 
 ## Downloader limits
 
-The backend allows two concurrent extractions and defaults to 10 download requests per client per minute. Live recordings have no duration limit, but storage limits still apply.
+The backend allows two concurrent extractions. Live recordings have no duration limit, but storage limits still apply.
 
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
@@ -80,15 +80,12 @@ The backend allows two concurrent extractions and defaults to 10 download reques
 | `DOWNLOAD_STORAGE_QUOTA_BYTES` | `10737418240` (10 GiB) | Maximum total stored bytes; must be positive |
 | `DOWNLOAD_MIN_FREE_BYTES` | `1073741824` (1 GiB) | Free space reserve; zero disables it |
 | `DOWNLOAD_STORAGE_CHECK_SECONDS` | `1` | Storage check interval; greater than 0, at most 60 seconds |
-| `DOWNLOAD_RATE_LIMIT` | `10` | Request attempts per client per window |
-| `DOWNLOAD_RATE_WINDOW_SECONDS` | `60` | Rate-limit window in seconds; must be positive |
-| `DOWNLOAD_TRUSTED_PROXIES` | Empty | Trusted proxy IPv4/IPv6 CIDRs, comma-separated |
 
-Storage checks include partial files, completed files awaiting collection (up to ten minutes), and active transfers. Exceeding a limit stops the affected job and removes its files; retained downloads aren't evicted to make room. Requests rejected for rate or storage limits return HTTP 429 or 507 respectively.
+Storage checks include partial files, completed files awaiting collection (up to ten minutes), and active transfers. Exceeding a limit stops the affected job and removes its files; retained downloads aren't evicted to make room. Requests rejected because both download slots are busy return HTTP 429; requests rejected for storage limits return HTTP 507.
 
-Checks are periodic, so usage can briefly exceed the limit. Use a filesystem or container storage quota for a strict ceiling, and run only one backend process per storage root and rate-limit policy. Rate-limit state resets on restart.
+Checks are periodic, so usage can briefly exceed the limit. Use a filesystem or container storage quota for a strict ceiling, and run only one backend process per storage root.
 
-Production Docker limits the downloader to two CPUs and 2 GiB of memory, keeps its port private, and trusts only Nginx at `172.30.50.2`. If you change the proxy subnet, update the trusted CIDR too. Behind another load balancer, configure Nginx's trusted real-IP sources explicitly. Don't trust arbitrary private networks; non-Docker setups ignore forwarding headers by default.
+Production Docker limits the downloader to two CPUs and 2 GiB of memory, and keeps its port private.
 
 ## Tests
 

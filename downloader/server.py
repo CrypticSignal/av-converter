@@ -1,5 +1,4 @@
 """Request-based yt-dlp downloads. Files exist only for the current request."""
-import ipaddress
 import json
 import logging
 import mimetypes
@@ -105,52 +104,7 @@ class StorageGuard:
             raise DownloadError('Downloader disk space is low. Please try again later.')
 
 
-class RateLimiter:
-    """Bounded, fixed-window admission rate; active recordings never expire."""
-
-    def __init__(self):
-        self.limit = int(os.environ.get('DOWNLOAD_RATE_LIMIT', '10'))
-        self.window = float(os.environ.get('DOWNLOAD_RATE_WINDOW_SECONDS', '60'))
-        self.max_clients = 10000
-        if self.limit <= 0 or self.window <= 0:
-            raise ValueError('Invalid downloader rate limits.')
-        self.clients = {}
-        self.lock = threading.Lock()
-
-    def allow(self, client):
-        now = time.monotonic()
-        with self.lock:
-            self.clients = {key: value for key, value in self.clients.items()
-                            if now - value[0] < self.window}
-            start, count = self.clients.get(client, (now, 0))
-            if count >= self.limit or (client not in self.clients
-                                      and len(self.clients) >= self.max_clients):
-                return False
-            self.clients[client] = (start, count + 1)
-            return True
-
-
 STORAGE = StorageGuard()
-RATE_LIMITER = RateLimiter()
-TRUSTED_PROXY_NETWORKS = tuple(ipaddress.ip_network(value.strip()) for value in
-                               os.environ.get('DOWNLOAD_TRUSTED_PROXIES', '').split(',')
-                               if value.strip())
-
-
-def client_identity(peer, forwarded):
-    """Walk the chain right-to-left, stopping at the first untrusted hop."""
-    address = ipaddress.ip_address(peer)
-    if not any(address in network for network in TRUSTED_PROXY_NETWORKS):
-        return str(address)
-    try:
-        chain = [ipaddress.ip_address(value.strip()) for value in forwarded.split(',')]
-    except ValueError:
-        return str(address)
-    for hop in reversed(chain):
-        if not any(address in network for network in TRUSTED_PROXY_NETWORKS):
-            break
-        address = hop
-    return str(address)
 
 
 def stop_process(process):
@@ -369,10 +323,6 @@ class DownloadHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path != '/api/download':
             self.error(404, 'Not found.')
-            return
-        if not RATE_LIMITER.allow(client_identity(self.client_address[0],
-                                                  self.headers.get('X-Forwarded-For', ''))):
-            self.error(429, 'Too many download requests. Please try again later.')
             return
         if self.headers.get_content_type() != 'application/x-www-form-urlencoded':
             self.error(415, 'Submit the form on the download page.')

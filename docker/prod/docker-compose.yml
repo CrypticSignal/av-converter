@@ -10,14 +10,6 @@ services:
       DOWNLOAD_STORAGE_QUOTA_BYTES: ${DOWNLOAD_STORAGE_QUOTA_BYTES:-10737418240}
       DOWNLOAD_MIN_FREE_BYTES: ${DOWNLOAD_MIN_FREE_BYTES:-1073741824}
       DOWNLOAD_STORAGE_CHECK_SECONDS: ${DOWNLOAD_STORAGE_CHECK_SECONDS:-1}
-      DOWNLOAD_RATE_LIMIT: ${DOWNLOAD_RATE_LIMIT:-10}
-      DOWNLOAD_RATE_WINDOW_SECONDS: ${DOWNLOAD_RATE_WINDOW_SECONDS:-60}
-      DOWNLOAD_TRUSTED_PROXIES: 172.30.50.2/32
-    networks:
-      default:
-      downloader_proxy:
-        aliases:
-          - downloader-api
     volumes:
       - type: bind
         source: ../../cookies.txt
@@ -26,10 +18,6 @@ services:
         bind:
           create_host_path: false
   nginx:
-    networks:
-      default:
-      downloader_proxy:
-        ipv4_address: 172.30.50.2
     container_name: nginx
     image: nginx:latest
     ports:
@@ -82,13 +70,6 @@ services:
       - grafana_data:/var/lib/grafana
     depends_on:
       - loki
-
-networks:
-  downloader_proxy:
-    internal: true
-    ipam:
-      config:
-        - subnet: 172.30.50.0/29
 
 volumes:
   certbot_webroot_path:
