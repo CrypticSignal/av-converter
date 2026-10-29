@@ -76,26 +76,33 @@ interface CodecHandlerResult {
 
 const COPY_AUDIO_STREAM = ["-c:a", "copy"];
 const COPY_VIDEO_STREAM = ["-c:V", "copy"];
+// MP4 and MOV can hold AAC, AC3, ALAC and MP3 next to the copied video, so those
+// codecs keep the input's container; everything else goes into Matroska.
+const MP4_FAMILY = [".mp4", ".mov"];
+const keepVideoExtension = (ext: string) => {
+  const lower = ext.toLowerCase();
+  return MP4_FAMILY.includes(lower) ? lower : ".mkv";
+};
 
-const handleAAC = (options: Extract<EncodingOptions, { codec: "AAC" }>, outputName: string): CodecHandlerResult => {
+const handleAAC = (options: Extract<EncodingOptions, { codec: "AAC" }>, outputName: string, ext: string): CodecHandlerResult => {
   const args = [];
   if (options.isKeepVideo) args.push(...COPY_VIDEO_STREAM);
   args.push("-c:a", "aac", "-b:a", `${options.bitrateSliderValue}k`);
-  return { args, outputFilename: `${outputName}${options.isKeepVideo ? ".mkv" : ".aac"}` };
+  return { args, outputFilename: `${outputName}${options.isKeepVideo ? keepVideoExtension(ext) : ".aac"}` };
 };
 
-const handleAC3 = (options: Extract<EncodingOptions, { codec: "AC3" }>, outputName: string): CodecHandlerResult => {
+const handleAC3 = (options: Extract<EncodingOptions, { codec: "AC3" }>, outputName: string, ext: string): CodecHandlerResult => {
   const args = [];
   if (options.isKeepVideo) args.push(...COPY_VIDEO_STREAM);
   args.push("-c:a", "ac3", "-b:a", `${options.ac3Bitrate}k`);
-  return { args, outputFilename: `${outputName}${options.isKeepVideo ? ".mkv" : ".ac3"}` };
+  return { args, outputFilename: `${outputName}${options.isKeepVideo ? keepVideoExtension(ext) : ".ac3"}` };
 };
 
-const handleALAC = (options: Extract<EncodingOptions, { codec: "ALAC" }>, outputName: string): CodecHandlerResult => {
+const handleALAC = (options: Extract<EncodingOptions, { codec: "ALAC" }>, outputName: string, ext: string): CodecHandlerResult => {
   const args = [];
   if (options.isKeepVideo) args.push(...COPY_VIDEO_STREAM);
   args.push("-c:a", "alac");
-  return { args, outputFilename: `${outputName}.${options.isKeepVideo ? "mkv" : "m4a"}` };
+  return { args, outputFilename: `${outputName}${options.isKeepVideo ? keepVideoExtension(ext) : ".m4a"}` };
 };
 
 const handleCAF = (options: Extract<EncodingOptions, { codec: "CAF" }>, outputName: string): CodecHandlerResult => {
@@ -121,7 +128,7 @@ const handleMKA = (outputName: string): CodecHandlerResult => {
 };
 
 const handleMP3 = (options: Extract<EncodingOptions, { codec: "MP3" }>, outputName: string, ext: string): CodecHandlerResult => {
-  const outputFilename = `${outputName}${options.isKeepVideo ? (ext === ".mp4" ? ext : ".mkv") : ".mp3"}`;
+  const outputFilename = `${outputName}${options.isKeepVideo ? keepVideoExtension(ext) : ".mp3"}`;
   const args = [];
   if (options.isKeepVideo) args.push(...COPY_VIDEO_STREAM);
   args.push("-c:a", "libmp3lame");
@@ -166,13 +173,13 @@ export const createFFmpegArgs = (
 
   switch (options.codec) {
     case "AAC":
-      result = handleAAC(options, outputName);
+      result = handleAAC(options, outputName, ext);
       break;
     case "AC3":
-      result = handleAC3(options, outputName);
+      result = handleAC3(options, outputName, ext);
       break;
     case "ALAC":
-      result = handleALAC(options, outputName);
+      result = handleALAC(options, outputName, ext);
       break;
     case "CAF":
       result = handleCAF(options, outputName);

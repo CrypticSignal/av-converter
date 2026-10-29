@@ -54,7 +54,9 @@ describe('keep-video containers', () => {
     it.each(['webm', 'ogg', 'avi', 'mov', 'mp4', 'mkv', 'MP4', '']) (
       `${options.codec}: chooses a compatible container for original extension "%s"`, (extension) => {
         const input = `input${extension ? `.${extension}` : ''}`;
-        const outputFilename = `output.${options.codec === 'MP3' && extension === 'mp4' ? 'mp4' : 'mkv'}`;
+        const keepsContainer = ['AAC', 'AC3', 'ALAC', 'MP3'].includes(options.codec)
+          && ['mp4', 'mov'].includes(extension.toLowerCase());
+        const outputFilename = `output.${keepsContainer ? extension.toLowerCase() : 'mkv'}`;
         const result = createFFmpegArgs(input, { ...options, isKeepVideo: true, downmixToStereo: true }, 'output');
         expect(result?.outputFilename).toBe(outputFilename);
         expect(result?.ffmpegArgs.slice(0, 2)).toEqual(['-i', input]);
