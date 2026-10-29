@@ -413,8 +413,9 @@ class DownloadTests(unittest.TestCase):
             self.assertEqual(status, 507)
             self.assertIn(b'quota', body)
             download.assert_not_called()
-        self.assertTrue(DOWNLOAD_SLOTS.acquire(blocking=False))
-        self.assertTrue(DOWNLOAD_SLOTS.acquire(blocking=False))
+        # The handler releases its slot just after responding, so allow it a moment.
+        self.assertTrue(DOWNLOAD_SLOTS.acquire(timeout=5))
+        self.assertTrue(DOWNLOAD_SLOTS.acquire(timeout=5))
         DOWNLOAD_SLOTS.release()
         DOWNLOAD_SLOTS.release()
 
