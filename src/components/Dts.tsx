@@ -1,12 +1,11 @@
 import React from "react";
-import BitrateSlider from "./BitrateSlider";
+import BitrateSlider, { type BitrateSliderProps } from "./BitrateSlider";
 
 interface DtsProps {
-  bitrate: string;
-  onBitrateChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  bitrate: BitrateSliderProps;
 }
 
-const Dts: React.FC<DtsProps> = ({ bitrate, onBitrateChange }) => {
+const Dts: React.FC<DtsProps> = ({ bitrate }) => {
   return (
     <div id="DTS">
       <p>
@@ -14,7 +13,7 @@ const Dts: React.FC<DtsProps> = ({ bitrate, onBitrateChange }) => {
         as 7.1 surround) will get downmixed to 5.1
       </p>
       <p>Set your desired bitrate via the slider:</p>
-      <BitrateSlider value={bitrate} onChange={onBitrateChange} min="384" max="1536" step="128" />
+      <BitrateSlider {...bitrate} />
       <i>
         A higher bitrate allows for potentially higher audio quality, at the expense of a larger
         file size.

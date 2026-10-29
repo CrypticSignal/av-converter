@@ -166,10 +166,10 @@ export const createFFmpegArgs = (
   inputFilename: string,
   options: EncodingOptions,
   outputName: string
-): ConversionData | undefined => {
+): ConversionData => {
   const ext = inputFilename.substring(inputFilename.lastIndexOf("."));
 
-  let result: CodecHandlerResult | undefined;
+  let result: CodecHandlerResult;
 
   switch (options.codec) {
     case "AAC":
@@ -206,8 +206,6 @@ export const createFFmpegArgs = (
       result = handleWAV(options, outputName);
       break;
   }
-
-  if (!result) return undefined;
 
   const finalArgs = [...result.args];
   if ("downmixToStereo" in options && options.downmixToStereo && !result.isCopyAudio) {

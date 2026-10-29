@@ -159,3 +159,49 @@ it('starts loading FFmpeg when a file is selected and ignores preload failures',
   view.unmount();
   expect(isActive()).toBe(false);
 });
+
+const selectFile = (view: ReturnType<typeof render>, name: string) => {
+  const file = new File(['media'], name);
+  fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+  return file;
+};
+const lastArgs = () => vi.mocked(convertFile).mock.calls.at(-1)!;
+
+it.each([
+  ['AAC', 'aac'], ['AC3', 'ac3'], ['ALAC', 'alac'], ['CAF', 'alac'], ['DTS', 'dca'], ['FLAC', 'flac'],
+  ['MKA', 'copy'], ['MP3', 'libmp3lame'], ['Opus', 'libopus'], ['Vorbis', 'libvorbis'], ['WAV', 'pcm_s16le'],
+])('renders the %s settings and encodes with %s', (codec, encoder) => {
+  const view = render(<Homepage />);
+  selectFile(view, 'input.wav');
+  fireEvent.change(view.container.querySelector('#codecs')!, { target: { value: codec } });
+  fireEvent.click(view.getByRole('button', { name: /^convert/i }));
+  const args = lastArgs()[2];
+  expect(args[args.indexOf('-c:a') + 1]).toBe(encoder);
+  view.unmount();
+});
+
+it('offers keeping the video for AAC', () => {
+  const view = render(<Homepage />);
+  selectFile(view, 'clip.mp4');
+  fireEvent.change(view.container.querySelector('#codecs')!, { target: { value: 'AAC' } });
+  fireEvent.click(view.getByLabelText('Keep the video (if applicable)'));
+  fireEvent.click(view.getByRole('button', { name: /^convert/i }));
+  expect(lastArgs()[2]).toEqual(['-i', 'clip.mp4', '-c:V', 'copy', '-c:a', 'aac', '-b:a', '192k', 'clip.mp4']);
+  view.unmount();
+});
+
+it('prefills an editable output name and requires one', () => {
+  const view = render(<Homepage />);
+  selectFile(view, 'no-extension');
+  const outputName = view.container.querySelector<HTMLInputElement>('#output_name')!;
+  expect(outputName.value).toBe('no-extension');
+  fireEvent.change(outputName, { target: { value: '  renamed  ' } });
+  fireEvent.click(view.getByRole('button', { name: /^convert/i }));
+  expect(lastArgs()[4]).toBe('renamed.mp3');
+  fireEvent.click(view.getByRole('button', { name: 'Cancel' }));
+  fireEvent.change(outputName, { target: { value: ' ' } });
+  fireEvent.click(view.getByRole('button', { name: /^convert/i }));
+  expect(convertFile).toHaveBeenCalledTimes(1);
+  expect(view.getByRole('alert').textContent).toContain('Please enter an output filename.');
+  view.unmount();
+});

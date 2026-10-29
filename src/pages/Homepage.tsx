@@ -4,10 +4,10 @@ import { convertFile, loadFFmpeg } from '../utils/convertFile';
 import OperationStatus from '../components/OperationStatus';
 import type { OperationProgress } from '../utils/progress';
 import Button from '@mui/material/Button';
-import { createFFmpegArgs, EncodingOptions } from '../utils/createFFmpegArgs';
+import { createFFmpegArgs } from '../utils/createFFmpegArgs';
 import { parseArgs } from '../utils/parseArgs';
+import { DEFAULT_SETTINGS, FORMATS, type Codec, type FormatSettings, type StringSetting } from '../formats';
 // General Components
-import BitrateSlider from '../components/BitrateSlider';
 import ConvertButton from '../components/ConvertButton';
 import FileInput from '../components/FileInput';
 import FormatSelector from '../components/FormatSelector';
@@ -15,56 +15,47 @@ import IsKeepVideo from '../components/IsKeepVideo';
 // Images
 import ffmpegLogo from '../images/ffmpeg-25.png';
 import webAssemblyLogo from '../images/webassembly-25.png';
-// Output Format Related Components
-import AC3 from '../components/AC3';
-import DTS from '../components/Dts';
-import FLAC from '../components/Flac';
-import MP3EncodingTypeSelector from '../components/MP3/EncodingTypeSelector';
-import NoSettingsApplicable from '../components/NoSettingsApplicable';
-import Opus from '../components/Opus';
-import VorbisEncodingType from '../components/Vorbis/EncodingType';
-import WavBitDepthSelector from '../components/WavBitDepthSelector';
 // Material UI
 import Alert, { AlertColor } from '@mui/material/Alert';
 import Typography from '@mui/material/Typography';
 import Divider from '@mui/material/Divider';
 
+const withoutExtension = (filename: string) =>
+  filename.includes('.') ? filename.slice(0, filename.lastIndexOf('.')) : filename;
+
 const Homepage = (): JSX.Element => {
   const [alertMessage, setAlertMessage] = useState('');
   const [alertSeverity, setAlertSeverity] = useState<AlertColor>('info');
-  const [codec, setCodec] = useState('MP3');
+  const [codec, setCodec] = useState<Codec>('MP3');
+  const [settings, setSettings] = useState<FormatSettings>(DEFAULT_SETTINGS);
   const [ffmpegCommand, setFfmpegCommand] = useState('');
   const [file, setFile] = useState<File | undefined>(undefined);
   const [inputFilename, setInputFilename] = useState('');
+  const [outputName, setOutputName] = useState('');
   const [isConverting, setIsConverting] = useState(false);
   const [manualCommandInput, setManualCommandInput] = useState('');
   const [manualMode, setManualMode] = useState(false);
-  // AC3
-  const [ac3Bitrate, setAc3Bitrate] = useState('640');
-  // FLAC
-  const [flacCompression, setFlacCompression] = useState('5');
-  // Keep the video?
-  const [isKeepVideo, setIsKeepVideo] = useState(false);
-  // MP3
-  const [mp3EncodingType, setMp3EncodingType] = useState('cbr');
-  const [mp3VbrSetting, setMp3VbrSetting] = useState('0');
-  // Opus
-  const [opusEncodingType, setOpusEncodingType] = useState('vbr');
-  // Vorbis
-  const [vorbisEncodingType, setVorbisEncodingType] = useState('abr');
-  const [qValue, setQValue] = useState('6');
-  // WAV
-  const [wavBitDepth, setWavBitDepth] = useState('16');
-  // Bitrate slider value, remembered per format.
-  const [bitrates, setBitrates] = useState<Record<string, string>>({
-    AAC: '192', DTS: '768', MP3: '192', Opus: '192', Vorbis: '192',
-  });
-  // Downmix to stereo?
-  const [downmixToStereo, setDownmixToStereo] = useState(false);
   // Conversion progress.
   const [status, setStatus] = useState<OperationProgress>({ stage: 'Ready' });
   const [logs, setLogs] = useState('');
   const session = useRef<object | null>(null);
+
+  const format = FORMATS[codec];
+  const update = <K extends keyof FormatSettings>(key: K, value: FormatSettings[K]) =>
+    setSettings(previous => ({ ...previous, [key]: value }));
+  const onSettingChange = (key: StringSetting) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => update(key, e.currentTarget.value);
+  // Radio pairs with "yes" and "no" values.
+  const onYesNoChange = (key: 'isKeepVideo' | 'downmixToStereo') =>
+    (e: React.ChangeEvent<HTMLInputElement>) => update(key, e.currentTarget.value === 'yes');
+  const bitrate = format.bitrate && {
+    min: format.bitrate.min,
+    max: format.bitrate.max,
+    step: format.bitrate.step,
+    value: settings.bitrates[codec] ?? format.bitrate.initial,
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
+      update('bitrates', { ...settings.bitrates, [codec]: e.currentTarget.value }),
+  };
 
   const onFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.currentTarget.files && e.currentTarget.files[0]) {
@@ -73,63 +64,12 @@ const Homepage = (): JSX.Element => {
       // Fetch the ~30 MB core while the user picks settings. Failures are retried on convert.
       const instance = ffmpegRef.current;
       if (instance) void loadFFmpeg(instance, () => ffmpegRef.current === instance).catch(() => {});
-      const filename = currentFile.name;
-      setInputFilename(filename);
-      const outputNameBox = document.getElementById('output_name') as HTMLInputElement;
-      if (outputNameBox) {
-        outputNameBox.value = filename.split('.').slice(0, -1).join('.');
-      }
+      setInputFilename(currentFile.name);
+      setOutputName(withoutExtension(currentFile.name));
     } else {
       setInputFilename('');
       setFile(undefined);
     }
-  };
-
-  const onCodecChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setCodec(e.currentTarget.value);
-  };
-  // AC3
-  const onAc3BitrateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setAc3Bitrate(e.currentTarget.value);
-  };
-  // FLAC
-  const onFlacCompressionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFlacCompression(e.currentTarget.value);
-  };
-  // isKeepVideo
-  const onIsKeepVideoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.currentTarget.value === 'yes' ? setIsKeepVideo(true) : setIsKeepVideo(false);
-  };
-  // MP3
-  const onMp3EncodingTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setMp3EncodingType(e.currentTarget.value);
-  };
-  const onMp3VbrSettingChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setMp3VbrSetting(e.currentTarget.value);
-  };
-  // Opus
-  const onOpusEncodingTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setOpusEncodingType(e.currentTarget.value);
-  };
-  // Vorbis
-  const onVorbisEncodingTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setVorbisEncodingType(e.currentTarget.value);
-  };
-  const onVorbisQualitySliderMoved = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setQValue(e.currentTarget.value);
-  };
-  // WAV
-  const onWavBitDepthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setWavBitDepth(e.currentTarget.value);
-  };
-  const onDownmixToStereoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.currentTarget.value === 'yes' ? setDownmixToStereo(true) : setDownmixToStereo(false);
-  };
-
-  const bitrateSliderValue = bitrates[codec];
-  const onBitrateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.currentTarget.value;
-    setBitrates(previous => ({ ...previous, [codec]: value }));
   };
 
   const ffmpegRef = useRef<FFmpeg | null>(null);
@@ -167,9 +107,6 @@ const Homepage = (): JSX.Element => {
     setAlertMessage('');
     setFfmpegCommand('');
 
-    const outputNameElement = document.getElementById('output_name') as HTMLInputElement;
-    const outputNameValue = outputNameElement ? outputNameElement.value : '';
-
     let ffmpegArgs: string[];
     let outputFilename = '';
 
@@ -186,7 +123,6 @@ const Homepage = (): JSX.Element => {
       if (restOfArgs.length === 0) {
         setAlertSeverity('error');
         setAlertMessage('Please enter the rest of the command.');
-        setIsConverting(false);
         return;
       }
 
@@ -198,81 +134,19 @@ const Homepage = (): JSX.Element => {
 
       ffmpegArgs = ['-i', inputFilename, ...threads, ...restOfArgs];
       outputFilename = ffmpegArgs[ffmpegArgs.length - 1];
-      
       if (!outputFilename) {
         setAlertSeverity('error');
         setAlertMessage('Could not parse output filename from command.');
-        setIsConverting(false);
         return;
       }
     } else {
-      let options: EncodingOptions;
-
-      switch (codec) {
-        case 'AAC':
-          options = { codec: 'AAC', bitrateSliderValue, isKeepVideo, downmixToStereo };
-          break;
-        case 'AC3':
-          options = { codec: 'AC3', ac3Bitrate, isKeepVideo, downmixToStereo };
-          break;
-        case 'ALAC':
-          options = { codec: 'ALAC', isKeepVideo, downmixToStereo };
-          break;
-        case 'CAF':
-          options = { codec: 'CAF', downmixToStereo };
-          break;
-        case 'DTS':
-          options = { codec: 'DTS', bitrateSliderValue, isKeepVideo, downmixToStereo };
-          break;
-        case 'FLAC':
-          options = { codec: 'FLAC', flacCompression, isKeepVideo, downmixToStereo };
-          break;
-        case 'MKA':
-          options = { codec: 'MKA', downmixToStereo };
-          break;
-        case 'MP3':
-          options = {
-            codec: 'MP3',
-            bitrateSliderValue,
-            isKeepVideo,
-            mp3EncodingType,
-            mp3VbrSetting,
-            downmixToStereo,
-          };
-          break;
-        case 'Opus':
-          options = { codec: 'Opus', bitrateSliderValue, opusEncodingType, downmixToStereo };
-          break;
-        case 'Vorbis':
-          options = {
-            codec: 'Vorbis',
-            bitrateSliderValue,
-            qValue,
-            vorbisEncodingType,
-            downmixToStereo,
-          };
-          break;
-        case 'WAV':
-          options = { codec: 'WAV', wavBitDepth, downmixToStereo };
-          break;
-        default:
-          setAlertSeverity('error');
-          setAlertMessage('Invalid codec selected.');
-          setIsConverting(false);
-          return;
-      }
-
-      const conversionData = createFFmpegArgs(inputFilename, options, outputNameValue);
-
-      if (conversionData === undefined) {
-        setIsConverting(false);
+      if (!outputName.trim()) {
         setAlertSeverity('error');
-        setAlertMessage('Failed to generate conversion settings. Check codec compatibility.');
+        setAlertMessage('Please enter an output filename.');
         return;
       }
-
-      ffmpegArgs = conversionData.ffmpegArgs;
-      outputFilename = conversionData.outputFilename;
+      const options = format.options(settings, bitrate?.value ?? '');
+      ({ ffmpegArgs, outputFilename } = createFFmpegArgs(inputFilename, options, outputName.trim()));
     }
 
     setFfmpegCommand(`ffmpeg ${ffmpegArgs.join(' ')}`);
@@ -288,86 +162,6 @@ const Homepage = (): JSX.Element => {
         log: message => { if (active()) setLogs(previous => (previous + message + '\n').slice(-100_000)); },
         knownTimeline: !manualMode,
       }).finally(() => { if (active()) session.current = null; });
-  };
-
-  const showFormatSettings = (): JSX.Element | null => {
-    switch (codec) {
-      case 'AAC':
-        return <BitrateSlider value={bitrateSliderValue} onChange={onBitrateChange} min="32" max="256" step="32" />;
-      case 'AC3':
-        return (
-          <div>
-            <AC3 onAc3BitrateChange={onAc3BitrateChange} ac3Bitrate={ac3Bitrate} />
-            <IsKeepVideo onIsKeepVideoChange={onIsKeepVideoChange} isKeepVideo={isKeepVideo} />
-          </div>
-        );
-      case 'ALAC':
-        return (
-          <div>
-            <NoSettingsApplicable />
-            <IsKeepVideo onIsKeepVideoChange={onIsKeepVideoChange} isKeepVideo={isKeepVideo} />
-          </div>
-        );
-      case 'CAF':
-        return <NoSettingsApplicable />;
-      case 'DTS':
-        return (
-          <div>
-            <DTS bitrate={bitrateSliderValue} onBitrateChange={onBitrateChange} />
-            <IsKeepVideo onIsKeepVideoChange={onIsKeepVideoChange} isKeepVideo={isKeepVideo} />
-          </div>
-        );
-      case 'FLAC':
-        return (
-          <div>
-            <FLAC
-              onFlacCompressionChange={onFlacCompressionChange}
-              flacCompression={flacCompression}
-            />
-            <IsKeepVideo onIsKeepVideoChange={onIsKeepVideoChange} isKeepVideo={isKeepVideo} />
-          </div>
-        );
-      case 'MP3':
-        return (
-          <div>
-            <MP3EncodingTypeSelector
-              onEncodingTypeChange={onMp3EncodingTypeChange}
-              encodingType={mp3EncodingType}
-              onVbrSettingChange={onMp3VbrSettingChange}
-              vbrSetting={mp3VbrSetting}
-              bitrate={bitrateSliderValue}
-              onBitrateChange={onBitrateChange}
-            />
-            <IsKeepVideo onIsKeepVideoChange={onIsKeepVideoChange} isKeepVideo={isKeepVideo} />
-          </div>
-        );
-      case 'Opus':
-        return (
-          <Opus
-            onOpusEncodingTypeChange={onOpusEncodingTypeChange}
-            encodingType={opusEncodingType}
-            bitrate={bitrateSliderValue}
-            onBitrateChange={onBitrateChange}
-          />
-        );
-      case 'Vorbis':
-        return (
-          <VorbisEncodingType
-            onVorbisEncodingTypeChange={onVorbisEncodingTypeChange}
-            vorbisEncodingType={vorbisEncodingType}
-            onQualitySliderMoved={onVorbisQualitySliderMoved}
-            qValue={qValue}
-            bitrate={bitrateSliderValue}
-            onBitrateChange={onBitrateChange}
-          />
-        );
-      case 'WAV':
-        return (
-          <WavBitDepthSelector onBitDepthChange={onWavBitDepthChange} bitDepth={wavBitDepth} />
-        );
-      default:
-        return null;
-    }
   };
 
   return (
@@ -431,14 +225,17 @@ const Homepage = (): JSX.Element => {
         </div>
       ) : (
         <>
-          <FormatSelector onCodecChange={onCodecChange} codec={codec} />
+          <FormatSelector onCodecChange={e => setCodec(e.currentTarget.value as Codec)} codec={codec} />
           <Divider sx={{ my: 2 }} />
 
           <Typography variant="h5" component="h2" gutterBottom>
             Encoder Settings
           </Typography>
 
-          {showFormatSettings()}
+          <format.Panel settings={settings} onChange={onSettingChange} bitrate={bitrate} />
+          {format.keepVideo && (
+            <IsKeepVideo onIsKeepVideoChange={onYesNoChange('isKeepVideo')} isKeepVideo={settings.isKeepVideo} />
+          )}
           
           <div className="my-4">
             <Typography variant="subtitle1" component="h3" gutterBottom>
@@ -449,8 +246,8 @@ const Homepage = (): JSX.Element => {
                 type="radio"
                 name="downmix"
                 value="yes"
-                checked={downmixToStereo}
-                onChange={onDownmixToStereoChange}
+                checked={settings.downmixToStereo}
+                onChange={onYesNoChange('downmixToStereo')}
                 className="mr-1"
               />
               Yes
@@ -460,8 +257,8 @@ const Homepage = (): JSX.Element => {
                 type="radio"
                 name="downmix"
                 value="no"
-                checked={!downmixToStereo}
-                onChange={onDownmixToStereoChange}
+                checked={!settings.downmixToStereo}
+                onChange={onYesNoChange('downmixToStereo')}
                 className="mr-1"
               />
               No
@@ -478,6 +275,8 @@ const Homepage = (): JSX.Element => {
             className="mt-1 block w-full max-w-xs mx-auto px-3 py-2 bg-white border border-gray-300 rounded-md text-sm shadow-sm placeholder-gray-400 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 disabled:shadow-none invalid:border-pink-500 invalid:text-pink-600 focus:invalid:border-pink-500 focus:invalid:ring-pink-500 text-black"
             maxLength={200}
             id="output_name"
+            value={outputName}
+            onChange={e => setOutputName(e.target.value)}
           />
         </>
       )}

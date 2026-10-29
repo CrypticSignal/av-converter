@@ -1,6 +1,6 @@
 import React from "react";
 
-interface BitrateSliderProps {
+export interface BitrateSliderProps {
   value: string;
   onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   min: string;

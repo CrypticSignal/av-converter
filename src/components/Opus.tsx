@@ -1,18 +1,16 @@
 import React from "react";
-import BitrateSlider from "./BitrateSlider";
+import BitrateSlider, { type BitrateSliderProps } from "./BitrateSlider";
 
 interface OpusProps {
   onOpusEncodingTypeChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   encodingType: string;
-  bitrate: string;
-  onBitrateChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  bitrate: BitrateSliderProps;
 }
 
 const Opus: React.FC<OpusProps> = ({
   onOpusEncodingTypeChange,
   encodingType,
   bitrate,
-  onBitrateChange,
 }) => {
   return (
     <div id="Opus">
@@ -22,7 +20,7 @@ const Opus: React.FC<OpusProps> = ({
         <option value="vbr">VBR (with a target bitrate)</option>
         <option value="cbr">CBR (Constant Bitrate)</option>
       </select>
-      <BitrateSlider value={bitrate} onChange={onBitrateChange} min="16" max="512" step="16" />
+      <BitrateSlider {...bitrate} />
       <i>
         Opus supports at most 256 kbps per channel. For mono audio, choose 256 kbps or less, or the
         conversion will fail.

@@ -1,5 +1,5 @@
 import React from "react";
-import BitrateSlider from "../BitrateSlider";
+import BitrateSlider, { type BitrateSliderProps } from "../BitrateSlider";
 import QualitySlider from "./QualitySlider";
 
 interface VorbisEncodingTypeProps {
@@ -7,8 +7,7 @@ interface VorbisEncodingTypeProps {
   vorbisEncodingType: string;
   onQualitySliderMoved: (event: React.ChangeEvent<HTMLInputElement>) => void;
   qValue: string;
-  bitrate: string;
-  onBitrateChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  bitrate: BitrateSliderProps;
 }
 
 const VorbisEncodingType: React.FC<VorbisEncodingTypeProps> = ({
@@ -17,14 +16,13 @@ const VorbisEncodingType: React.FC<VorbisEncodingTypeProps> = ({
   onQualitySliderMoved,
   qValue,
   bitrate,
-  onBitrateChange,
 }) => {
   function renderComponent() {
     switch (vorbisEncodingType) {
       case "abr":
         return (
           <>
-            <BitrateSlider value={bitrate} onChange={onBitrateChange} min="32" max="480" step="32" />
+            <BitrateSlider {...bitrate} />
             <i>For mono audio, choose 224 kbps or less, or the conversion will fail.</i>
           </>
         );
