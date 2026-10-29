@@ -108,9 +108,10 @@ export const FORMATS: Record<Codec, Format> = {
     label: 'FLAC (.flac)',
     extension: '.flac',
     keepVideo: 'mkv',
+    // With the video, keep every stream (including subtitles); otherwise only the audio streams.
     args: ({ isKeepVideo, flacCompression }) => [
-      ...(isKeepVideo ? ['-map', '0', '-c:s', 'copy'] : []),
-      '-map', '0:a', '-c:a', 'flac', '-compression_level', flacCompression,
+      ...(isKeepVideo ? ['-map', '0', '-c:s', 'copy'] : ['-map', '0:a']),
+      '-c:a', 'flac', '-compression_level', flacCompression,
     ],
     Panel: ({ settings, onChange }) =>
       <FLAC onFlacCompressionChange={onChange('flacCompression')} flacCompression={settings.flacCompression} />,
