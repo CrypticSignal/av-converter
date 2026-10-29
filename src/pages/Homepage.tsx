@@ -274,13 +274,6 @@ const Homepage = (): JSX.Element => {
       outputFilename = conversionData.outputFilename;
     }
 
-    if (outputFilename === inputFilename) {
-      setAlertSeverity('error');
-      setAlertMessage('Output filename cannot be same as the input filename.');
-      setIsConverting(false);
-      return;
-    }
-
     setFfmpegCommand(`ffmpeg ${ffmpegArgs.join(' ')}`);
     const ffmpeg = ffmpegRef.current ?? new FFmpeg();
     ffmpegRef.current = ffmpeg;

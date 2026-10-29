@@ -1,10 +1,13 @@
-import type { FFmpeg } from '@ffmpeg/ffmpeg';
+import type { FFFSType, FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { Dispatch, SetStateAction } from 'react';
 import { AlertColor } from '@mui/material';
 import { nonnegative, OperationProgress } from './progress';
 
 const loads = new WeakMap<FFmpeg, Promise<void>>();
+const INPUT_DIR = '/input';
+// FFFSType.WORKERFS; the package's runtime exports are stubbed outside browsers.
+const WORKERFS = 'WORKERFS' as FFFSType;
 const ERROR_PATTERN = /error|invalid|unsupported|unknown|not found|no such|could not|unable|cannot|failed/i;
 
 export const loadFFmpeg = (ffmpeg: FFmpeg, isActive = () => true): Promise<void> => {
@@ -78,6 +81,9 @@ export const convertFile = async (
       eta: duration && seconds !== undefined && rate ? Math.max(0, duration - seconds) / rate : undefined });
   };
   let filesTouched = false;
+  let inputMounted = false;
+  let inputWritten = false;
+  const inputPath = `${INPUT_DIR}/${inputFilename}`;
   try {
     checkActive();
     setIsConverting(true);
@@ -92,22 +98,32 @@ export const convertFile = async (
     // Never allow a failed execution to download a previous conversion's output.
     await ffmpeg.deleteFile(outputFilename).catch(() => {});
     checkActive();
-    const input = await fetchFile(file);
+    // Mount the input read-only so it is read on demand rather than copied into
+    // memory; fall back to copying if this core lacks WORKERFS. Either way the
+    // input lives in its own directory, so an output may share its name.
+    await ffmpeg.createDir(INPUT_DIR).catch(() => {}); // Exists after an earlier conversion.
     checkActive();
-    await ffmpeg.writeFile(inputFilename, input);
+    inputMounted = await ffmpeg.mount(WORKERFS, { blobs: [{ name: inputFilename, data: file }] }, INPUT_DIR);
     checkActive();
+    if (!inputMounted) {
+      const input = await fetchFile(file);
+      checkActive();
+      inputWritten = true;
+      await ffmpeg.writeFile(inputPath, input);
+      checkActive();
+    }
+    const args = ffmpegArgs.map((arg, i) => ffmpegArgs[i - 1] === '-i' && arg === inputFilename ? inputPath : arg);
     started = performance.now();
     report({ stage: 'Converting' });
     setAlertMessage('Converting');
-    const exitCode = await ffmpeg.exec(ffmpegArgs);
+    const exitCode = await ffmpeg.exec(args);
     checkActive();
     if (exitCode !== 0) throw new Error(`FFmpeg exited with code ${exitCode}`);
     setProgress(0);
     report({ stage: 'Preparing output' });
     const fileData = await ffmpeg.readFile(outputFilename);
     checkActive();
-    const data = new Uint8Array(fileData as Uint8Array);
-    const objectURL = URL.createObjectURL(new Blob([data.buffer]));
+    const objectURL = URL.createObjectURL(new Blob([fileData as Uint8Array]));
     try {
       const anchor = document.createElement('a');
       anchor.href = objectURL;
@@ -132,9 +148,12 @@ export const convertFile = async (
     ffmpeg.off('progress', onProgress);
     if (filesTouched && isActive()) {
       // Missing files and a terminated worker are expected cleanup cases.
-      for (const name of new Set([inputFilename, outputFilename])) {
+      const cleanup = [() => ffmpeg.deleteFile(outputFilename)];
+      if (inputMounted) cleanup.push(() => ffmpeg.unmount(INPUT_DIR));
+      if (inputWritten) cleanup.push(() => ffmpeg.deleteFile(inputPath));
+      for (const step of cleanup) {
         if (!isActive()) break;
-        try { await ffmpeg.deleteFile(name); } catch { /* best effort */ }
+        try { await step(); } catch { /* best effort */ }
       }
     }
     if (isActive()) setIsConverting(false);
