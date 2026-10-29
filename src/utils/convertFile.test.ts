@@ -25,7 +25,7 @@ const worker = () => ({
 type Worker = ReturnType<typeof worker>;
 const asFFmpeg = (w: Worker) => w as unknown as FFmpeg;
 const run = (w: Worker, active = () => true) => {
-  const setters = [vi.fn(), vi.fn(), vi.fn(), vi.fn()] as const;
+  const setters = [vi.fn(), vi.fn(), vi.fn()] as const;
   const promise = convertFile(asFFmpeg(w), new File(['input'], 'in.wav'),
     ['-i', 'in.wav', 'out.wav'], 'in.wav', 'out.wav', ...setters, active);
   return { promise, setters };
@@ -162,7 +162,7 @@ describe('conversion cleanup', () => {
     vi.spyOn(performance, 'now').mockReturnValue(1000);
     const status = vi.fn();
     const log = vi.fn();
-    const setters = [vi.fn(), vi.fn(), vi.fn(), vi.fn()] as const;
+    const setters = [vi.fn(), vi.fn(), vi.fn()] as const;
     const promise = convertFile(asFFmpeg(w), new File(['input'], 'in.wav'),
       ['-i', 'in.wav', 'out.wav'], 'in.wav', 'out.wav', ...setters, () => true, { status, log, knownTimeline });
     await vi.waitFor(() => expect(w.exec).toHaveBeenCalled());
@@ -223,7 +223,7 @@ describe('conversion cleanup', () => {
       expect(w.unmount).toHaveBeenCalledWith('/input');
     }
     expect(w.off).toHaveBeenCalledTimes(2);
-    expect(job.setters[3]).toHaveBeenLastCalledWith(false);
+    expect(job.setters[2]).toHaveBeenLastCalledWith(false);
   });
   it('ignores late events and completion after unmount, even if cleanup fails', async () => {
     const w = worker();
@@ -260,7 +260,7 @@ describe('input mounting', () => {
 it('only redirects -i inputs, so an output may reuse the input name', async () => {
   const w = worker();
   await convertFile(asFFmpeg(w), new File(['input'], 'clip.mp4'), ['-i', 'clip.mp4', '-c:V', 'copy', 'clip.mp4'],
-    'clip.mp4', 'clip.mp4', vi.fn(), vi.fn(), vi.fn(), vi.fn());
+    'clip.mp4', 'clip.mp4', vi.fn(), vi.fn(), vi.fn());
   expect(w.exec).toHaveBeenCalledWith(['-i', '/input/clip.mp4', '-c:V', 'copy', 'clip.mp4']);
   expect(w.readFile).toHaveBeenCalledWith('clip.mp4');
   expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledOnce();
@@ -276,7 +276,7 @@ describe('error reporting', () => {
     });
     const job = run(w);
     await job.promise;
-    return job.setters[1].mock.calls.at(-1)![0];
+    return job.setters[0].mock.calls.at(-1)![0];
   };
 
   it('shows the first FFmpeg error line rather than its consequences', async () => {
@@ -295,6 +295,6 @@ describe('error reporting', () => {
     w.writeFile.mockRejectedValue(new Error('Out of memory'));
     const job = run(w);
     await job.promise;
-    expect(job.setters[1]).toHaveBeenLastCalledWith('An error occurred during conversion: Out of memory');
+    expect(job.setters[0]).toHaveBeenLastCalledWith('An error occurred during conversion: Out of memory');
   });
 });

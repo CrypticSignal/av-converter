@@ -43,7 +43,6 @@ export const convertFile = async (
   ffmpegArgs: string[],
   inputFilename: string,
   outputFilename: string,
-  setProgress: Dispatch<SetStateAction<number>>,
   setAlertMessage: Dispatch<SetStateAction<string>>,
   setAlertSeverity: Dispatch<SetStateAction<AlertColor>>,
   setIsConverting: Dispatch<SetStateAction<boolean>>,
@@ -74,7 +73,6 @@ export const convertFile = async (
     const seconds = nonnegative(time) ? time / 1_000_000 : undefined;
     const rate = seconds !== undefined && seconds > 0 && elapsed > 0 ? seconds / elapsed : undefined;
     const percent = duration && seconds !== undefined ? Math.min(100, seconds / duration * 100) : undefined;
-    if (percent !== undefined) setProgress(percent);
     report({ stage: 'Converting', elapsed, percent,
       detail: seconds !== undefined ? `Processed ${seconds.toFixed(1)}s` : undefined,
       speed: rate !== undefined ? `${rate.toFixed(2)}x` : undefined,
@@ -119,7 +117,6 @@ export const convertFile = async (
     const exitCode = await ffmpeg.exec(args);
     checkActive();
     if (exitCode !== 0) throw new Error(`FFmpeg exited with code ${exitCode}`);
-    setProgress(0);
     report({ stage: 'Preparing output' });
     const fileData = await ffmpeg.readFile(outputFilename);
     checkActive();

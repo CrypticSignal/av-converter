@@ -41,28 +41,28 @@ it('cancels, replaces the worker on restart, and ignores old callbacks/finalizer
   });
   fireEvent.click(view.getByRole('button', { name: /^convert/i }));
   const old = vi.mocked(convertFile).mock.calls[0];
-  expect(old[9]!()).toBe(true);
+  expect(old[8]!()).toBe(true);
   fireEvent.click(view.getByRole('button', { name: 'Cancel' }));
   expect(instances[0].terminate).toHaveBeenCalledOnce();
-  expect(old[9]!()).toBe(false);
+  expect(old[8]!()).toBe(false);
   fireEvent.click(view.getByRole('button', { name: /^convert/i }));
   expect(instances).toHaveLength(2);
   const current = vi.mocked(convertFile).mock.calls[1];
   act(() => {
-    old[10]!.status({ stage: 'Stale progress' });
-    old[10]!.log('stale log');
-    current[10]!.status({ stage: 'Converting', percent: 25 });
-    current[10]!.log('x'.repeat(100_100));
+    old[9]!.status({ stage: 'Stale progress' });
+    old[9]!.log('stale log');
+    current[9]!.status({ stage: 'Converting', percent: 25 });
+    current[9]!.log('x'.repeat(100_100));
   });
   await act(async () => endings[0]());
-  expect(current[9]!()).toBe(true);
+  expect(current[8]!()).toBe(true);
   expect(view.getByRole('status').textContent).toContain('25.0%');
   expect(view.getByRole('status').textContent).not.toContain('Stale');
   expect(view.getByLabelText('Operation logs').textContent).toHaveLength(100_000);
   expect(view.getByRole('button', { name: 'Cancel' })).toBeTruthy();
   view.unmount();
   expect(instances[1].terminate).toHaveBeenCalledOnce();
-  expect(current[9]!()).toBe(false);
+  expect(current[8]!()).toBe(false);
   await act(async () => endings[1]());
 });
 
@@ -76,7 +76,7 @@ it('passes the selected MP3 stereo downmix setting into conversion arguments', (
     expect.anything(), file,
     ['-i', 'input.wav', '-c:a', 'libmp3lame', '-b:a', '192k', '-ac', '2', 'input.mp3'],
     'input.wav', 'input.mp3',
-    expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Object),
+    expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Object),
   );
   view.unmount();
 });
@@ -96,7 +96,7 @@ it('passes quoted manual-mode arguments through intact', () => {
   expect(convertFile).toHaveBeenCalledWith(
     expect.anything(), file, ['-i', 'input.wav', '-metadata', 'title=My Song', 'my output.mp3'],
     'input.wav', 'my output.mp3',
-    expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Object),
+    expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Object),
   );
   view.unmount();
 });

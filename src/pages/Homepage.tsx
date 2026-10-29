@@ -62,7 +62,6 @@ const Homepage = (): JSX.Element => {
   // Downmix to stereo?
   const [downmixToStereo, setDownmixToStereo] = useState(false);
   // Conversion progress.
-  const [, setProgress] = useState(0);
   const [status, setStatus] = useState<OperationProgress>({ stage: 'Ready' });
   const [logs, setLogs] = useState('');
   const session = useRef<object | null>(null);
@@ -166,7 +165,6 @@ const Homepage = (): JSX.Element => {
 
     console.clear();
     setAlertMessage('');
-    setProgress(0);
     setFfmpegCommand('');
 
     const outputNameElement = document.getElementById('output_name') as HTMLInputElement;
@@ -285,7 +283,7 @@ const Homepage = (): JSX.Element => {
     const active = () => session.current === currentSession && ffmpegRef.current === ffmpeg;
     setLogs('');
     setIsConverting(true);
-    void convertFile(ffmpeg, file, ffmpegArgs, inputFilename, outputFilename, setProgress, setAlertMessage, setAlertSeverity, setIsConverting,
+    void convertFile(ffmpeg, file, ffmpegArgs, inputFilename, outputFilename, setAlertMessage, setAlertSeverity, setIsConverting,
       active, { status: value => { if (active()) setStatus(value); },
         log: message => { if (active()) setLogs(previous => (previous + message + '\n').slice(-100_000)); },
         knownTimeline: !manualMode,
