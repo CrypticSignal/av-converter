@@ -224,3 +224,35 @@ describe('conversion cleanup', () => {
     expect(w.off).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('error reporting', () => {
+  const failWith = async (lines: string[], exitCode = 1) => {
+    const w = worker();
+    w.exec.mockImplementation(async () => {
+      const onLog = w.on.mock.calls.find(call => call[0] === 'log')![1];
+      lines.forEach(message => onLog({ message }));
+      return exitCode;
+    });
+    const job = run(w);
+    await job.promise;
+    return job.setters[1].mock.calls.at(-1)![0];
+  };
+
+  it('shows the first FFmpeg error line rather than its consequences', async () => {
+    expect(await failWith([
+      'Input #0, wav, from \'in.wav\':',
+      '[libopus @ 0x1] The bit rate 320000 bps is unsupported. Please choose a value between 500 and 256000.',
+      '[aost#0:0/libopus @ 0x2] Error while opening encoder - maybe incorrect parameters',
+      'Conversion failed!',
+    ])).toBe('An error occurred during conversion: [libopus @ 0x1] The bit rate 320000 bps is unsupported. Please choose a value between 500 and 256000.');
+  });
+
+  it('falls back to the exit code or thrown error when FFmpeg logged no error', async () => {
+    expect(await failWith(['Conversion failed!'])).toBe('An error occurred during conversion: FFmpeg exited with code 1');
+    const w = worker();
+    w.writeFile.mockRejectedValue(new Error('Out of memory'));
+    const job = run(w);
+    await job.promise;
+    expect(job.setters[1]).toHaveBeenLastCalledWith('An error occurred during conversion: Out of memory');
+  });
+});

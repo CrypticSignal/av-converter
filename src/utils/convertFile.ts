@@ -5,6 +5,7 @@ import { AlertColor } from '@mui/material';
 import { nonnegative, OperationProgress } from './progress';
 
 const loads = new WeakMap<FFmpeg, Promise<void>>();
+const ERROR_PATTERN = /error|invalid|unsupported|unknown|not found|no such|could not|unable|cannot|failed/i;
 
 export const loadFFmpeg = (ffmpeg: FFmpeg, isActive = () => true): Promise<void> => {
   const existing = loads.get(ffmpeg);
@@ -48,11 +49,16 @@ export const convertFile = async (
 ) => {
   let duration: number | undefined;
   let started: number | undefined;
+  // FFmpeg's first error line is usually the root cause; later ones are consequences.
+  let firstError: string | undefined;
   const report = (value: OperationProgress) => { if (isActive()) observe?.status(value); };
   const checkActive = () => { if (!isActive()) throw new Error('Page unmounted'); };
   const onLog = ({ message }: { message: string }) => {
     if (!isActive()) return;
     observe?.log(message);
+    if (firstError === undefined && message !== 'Conversion failed!' && ERROR_PATTERN.test(message)) {
+      firstError = message.trim().slice(0, 300);
+    }
     const match = message.match(/Duration: (\d+):(\d+):(\d+(?:\.\d+)?)/);
     if (observe?.knownTimeline && match) {
       const seconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
@@ -117,7 +123,8 @@ export const convertFile = async (
     if (isActive()) {
       console.error(error);
       setAlertSeverity('error');
-      setAlertMessage('An error occurred during conversion.');
+      const detail = firstError ?? (error instanceof Error ? error.message : undefined);
+      setAlertMessage(detail ? `An error occurred during conversion: ${detail}` : 'An error occurred during conversion.');
       report({ stage: 'Conversion failed' });
     }
   } finally {
