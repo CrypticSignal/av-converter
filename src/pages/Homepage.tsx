@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useAppSelector } from '../redux/hooks';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { convertFile } from '../utils/convertFile';
 import OperationStatus from '../components/OperationStatus';
@@ -56,6 +55,10 @@ const Homepage = (): JSX.Element => {
   const [qValue, setQValue] = useState('6');
   // WAV
   const [wavBitDepth, setWavBitDepth] = useState('16');
+  // Bitrate slider value, remembered per format.
+  const [bitrates, setBitrates] = useState<Record<string, string>>({
+    AAC: '192', DTS: '768', MP3: '192', Opus: '192', Vorbis: '192',
+  });
   // Downmix to stereo?
   const [downmixToStereo, setDownmixToStereo] = useState(false);
   // Conversion progress.
@@ -121,7 +124,11 @@ const Homepage = (): JSX.Element => {
     e.currentTarget.value === 'yes' ? setDownmixToStereo(true) : setDownmixToStereo(false);
   };
 
-  const bitrateSliderValue = useAppSelector((state) => state.bitrate.value);
+  const bitrateSliderValue = bitrates[codec];
+  const onBitrateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.currentTarget.value;
+    setBitrates(previous => ({ ...previous, [codec]: value }));
+  };
 
   const ffmpegRef = useRef<FFmpeg | null>(null);
   useEffect(() => {
@@ -292,7 +299,7 @@ const Homepage = (): JSX.Element => {
   const showFormatSettings = (): JSX.Element | null => {
     switch (codec) {
       case 'AAC':
-        return <BitrateSlider initialValue="192" min="32" max="256" step="32" />;
+        return <BitrateSlider value={bitrateSliderValue} onChange={onBitrateChange} min="32" max="256" step="32" />;
       case 'AC3':
         return (
           <div>
@@ -312,7 +319,7 @@ const Homepage = (): JSX.Element => {
       case 'DTS':
         return (
           <div>
-            <DTS />
+            <DTS bitrate={bitrateSliderValue} onBitrateChange={onBitrateChange} />
             <IsKeepVideo onIsKeepVideoChange={onIsKeepVideoChange} isKeepVideo={isKeepVideo} />
           </div>
         );
@@ -334,6 +341,8 @@ const Homepage = (): JSX.Element => {
               encodingType={mp3EncodingType}
               onVbrSettingChange={onMp3VbrSettingChange}
               vbrSetting={mp3VbrSetting}
+              bitrate={bitrateSliderValue}
+              onBitrateChange={onBitrateChange}
             />
             <IsKeepVideo onIsKeepVideoChange={onIsKeepVideoChange} isKeepVideo={isKeepVideo} />
           </div>
@@ -343,6 +352,8 @@ const Homepage = (): JSX.Element => {
           <Opus
             onOpusEncodingTypeChange={onOpusEncodingTypeChange}
             encodingType={opusEncodingType}
+            bitrate={bitrateSliderValue}
+            onBitrateChange={onBitrateChange}
           />
         );
       case 'Vorbis':
@@ -352,6 +363,8 @@ const Homepage = (): JSX.Element => {
             vorbisEncodingType={vorbisEncodingType}
             onQualitySliderMoved={onVorbisQualitySliderMoved}
             qValue={qValue}
+            bitrate={bitrateSliderValue}
+            onBitrateChange={onBitrateChange}
           />
         );
       case 'WAV':

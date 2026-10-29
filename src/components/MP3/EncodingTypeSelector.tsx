@@ -7,6 +7,8 @@ interface MP3EncodingTypeSelectorProps {
   encodingType: string;
   onVbrSettingChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   vbrSetting: string;
+  bitrate: string;
+  onBitrateChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
 const MP3EncodingTypeSelector: React.FC<MP3EncodingTypeSelectorProps> = ({
@@ -14,6 +16,8 @@ const MP3EncodingTypeSelector: React.FC<MP3EncodingTypeSelectorProps> = ({
   encodingType,
   onVbrSettingChange,
   vbrSetting,
+  bitrate,
+  onBitrateChange,
 }) => {
   return (
     <div id='mp3_encoding_div'>
@@ -34,7 +38,7 @@ const MP3EncodingTypeSelector: React.FC<MP3EncodingTypeSelectorProps> = ({
           vbrSetting={vbrSetting}
         />
       ) : (
-        <BitrateSlider initialValue='192' min='64' max='320' step='64' />
+        <BitrateSlider value={bitrate} onChange={onBitrateChange} min='64' max='320' step='64' />
       )}
     </div>
   );

@@ -1,26 +1,18 @@
-import { useEffect } from "react";
-import { useAppSelector, useAppDispatch } from "../redux/hooks";
-import { change, setDefault } from "../redux/bitrateSliderSlice";
+import React from "react";
 
 interface BitrateSliderProps {
-  initialValue: string;
+  value: string;
+  onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   min: string;
   max: string;
   step: string;
 }
 
-const BitrateSlider: React.FC<BitrateSliderProps> = ({ initialValue, min, max, step }) => {
-  const dispatch = useAppDispatch();
-  const currentValue = useAppSelector((state) => state.bitrate.value);
-
-  useEffect(() => {
-    dispatch(setDefault(initialValue));
-  }, [dispatch, initialValue]);
-
+const BitrateSlider: React.FC<BitrateSliderProps> = ({ value, onChange, min, max, step }) => {
   const getBackgroundSize = () => {
     const minVal = parseInt(min, 10);
     const maxVal = parseInt(max, 10);
-    const currentVal = parseInt(currentValue, 10);
+    const currentVal = parseInt(value, 10);
     const percentage = ((currentVal - minVal) * 100) / (maxVal - minVal);
     return Math.max(0, Math.min(100, percentage)); // Clamp between 0 and 100
   };
@@ -40,12 +32,12 @@ const BitrateSlider: React.FC<BitrateSliderProps> = ({ initialValue, min, max, s
           className="appearance-none w-full h-3 rounded-full outline-none cursor-pointer"
           min={min}
           max={max}
-          value={currentValue}
+          value={value}
           step={step}
-          onChange={(e) => dispatch(change(e.target.value))}
+          onChange={onChange}
           style={sliderStyle}
         />
-        <span className="ml-4 text-sm text-gray-700 whitespace-nowrap">{` ${currentValue} kbps`}</span>
+        <span className="ml-4 text-sm text-gray-700 whitespace-nowrap">{` ${value} kbps`}</span>
       </div>
     </div>
   );

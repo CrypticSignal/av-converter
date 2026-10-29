@@ -122,3 +122,26 @@ it('limits video encoder threads right after the input, outside Firefox only', (
   view.unmount();
   userAgent.mockRestore();
 });
+
+it('uses each format\'s own default bitrate and remembers changes per format', () => {
+  const view = render(<Homepage />);
+  fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [new File(['audio'], 'input.wav')] } });
+  const select = view.container.querySelector('#codecs')!;
+  const slider = () => view.container.querySelector<HTMLInputElement>('#bitrate_slider')!;
+  const convert = () => {
+    fireEvent.click(view.getByRole('button', { name: /^convert/i }));
+    const args = vi.mocked(convertFile).mock.calls.at(-1)![2];
+    return args[args.indexOf('-b:a') + 1];
+  };
+  fireEvent.change(select, { target: { value: 'DTS' } });
+  expect(slider().value).toBe('768');
+  fireEvent.change(slider(), { target: { value: '1024' } });
+  fireEvent.change(select, { target: { value: 'AAC' } });
+  expect(slider().value).toBe('192');
+  expect(convert()).toBe('192k');
+  fireEvent.click(view.getByRole('button', { name: 'Cancel' }));
+  fireEvent.change(select, { target: { value: 'DTS' } });
+  expect(slider().value).toBe('1024');
+  expect(convert()).toBe('1024k');
+  view.unmount();
+});

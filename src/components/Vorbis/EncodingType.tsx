@@ -7,6 +7,8 @@ interface VorbisEncodingTypeProps {
   vorbisEncodingType: string;
   onQualitySliderMoved: (event: React.ChangeEvent<HTMLInputElement>) => void;
   qValue: string;
+  bitrate: string;
+  onBitrateChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
 const VorbisEncodingType: React.FC<VorbisEncodingTypeProps> = ({
@@ -14,11 +16,13 @@ const VorbisEncodingType: React.FC<VorbisEncodingTypeProps> = ({
   vorbisEncodingType,
   onQualitySliderMoved,
   qValue,
+  bitrate,
+  onBitrateChange,
 }) => {
   function renderComponent() {
     switch (vorbisEncodingType) {
       case "abr":
-        return <BitrateSlider initialValue="192" min="32" max="512" step="32" />;
+        return <BitrateSlider value={bitrate} onChange={onBitrateChange} min="32" max="512" step="32" />;
       case "vbr":
         return <QualitySlider onSliderMoved={onQualitySliderMoved} qValue={qValue} />;
       default:
