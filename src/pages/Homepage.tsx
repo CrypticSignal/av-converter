@@ -23,7 +23,7 @@ import Divider from '@mui/material/Divider';
 const withoutExtension = (filename: string) =>
   filename.includes('.') ? filename.slice(0, filename.lastIndexOf('.')) : filename;
 
-const Homepage = (): JSX.Element => {
+const Homepage = (): React.JSX.Element => {
   const [alertMessage, setAlertMessage] = useState('');
   const [alertSeverity, setAlertSeverity] = useState<AlertColor>('info');
   const [codec, setCodec] = useState<Codec>('MP3');
