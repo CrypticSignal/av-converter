@@ -137,32 +137,28 @@ def run_monitored(args, on_output, metadata=False):
     readers = []
     captured = []
 
+    def send(message):
+        """Queue a message, giving up once the main loop has finished."""
+        while not finished.is_set():
+            try:
+                messages.put(message, timeout=0.1)
+                return
+            except queue.Full:
+                pass
+
     def read(pipe, source):
+        # Sends (source, line) per line, (None, exception) on a read error,
+        # and (source, None) when the pipe closes.
         try:
             while not finished.is_set():
                 line = pipe.readline(16384)
                 if not line:
                     break
-                while not finished.is_set():
-                    try:
-                        messages.put((source, line), timeout=0.1)
-                        break
-                    except queue.Full:
-                        pass
+                send((source, line))
         except Exception as exc:
-            while not finished.is_set():
-                try:
-                    messages.put((None, exc), timeout=0.1)
-                    break
-                except queue.Full:
-                    pass
+            send((None, exc))
         finally:
-            while not finished.is_set():
-                try:
-                    messages.put((source, None), timeout=0.1)
-                    break
-                except queue.Full:
-                    pass
+            send((source, None))
 
     started = time.monotonic()
     heartbeat = started + HEARTBEAT_SECONDS
