@@ -94,3 +94,11 @@ Run backend tests with mocked downloads and no external network access:
 ```sh
 python -m unittest discover -s downloader -p "test_*.py"
 ```
+
+Run frontend tests:
+
+```sh
+yarn test
+```
+
+GitHub Actions runs both suites and the production build on every push to master and on pull requests.
