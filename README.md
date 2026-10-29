@@ -21,6 +21,7 @@
 - [YouTube cookies](#youtube-cookies)
 - [Downloader limits](#downloader-limits)
 - [Tests](#tests)
+- [Code layout](#code-layout)
 
 ## Audio/Video Converter
 
@@ -102,3 +103,17 @@ yarn test
 ```
 
 GitHub Actions runs both suites and the production build on every push to master and on pull requests.
+
+## Code layout
+
+| Path | What it does |
+| --- | --- |
+| `src/formats.tsx` | One entry per output format: its label, extension, FFmpeg arguments and settings panel. |
+| `src/utils/createFFmpegArgs.ts` | Combines a format's arguments with the shared options: keep the video, downmix to stereo. |
+| `src/utils/convertFile.ts` | Runs FFmpeg (WebAssembly) in the browser and downloads the result. |
+| `src/pages/Homepage.tsx` | The converter page. |
+| `src/pages/DownloadPage.tsx` | The video downloader page, which streams progress from the backend. |
+| `downloader/server.py` | The yt-dlp backend. |
+| `public/ffmpeg_wasm/` | The FFmpeg WebAssembly core, served as static files. |
+
+To add an output format, add its name to `Codec` and an entry to `FORMATS` in `src/formats.tsx`, then add a row to the table in `src/utils/createFFmpegArgs.test.ts`.
