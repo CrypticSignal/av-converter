@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { convertFile } from '../utils/convertFile';
+import { convertFile, loadFFmpeg } from '../utils/convertFile';
 import OperationStatus from '../components/OperationStatus';
 import type { OperationProgress } from '../utils/progress';
 import Button from '@mui/material/Button';
@@ -71,6 +71,9 @@ const Homepage = (): JSX.Element => {
     if (e.currentTarget.files && e.currentTarget.files[0]) {
       const currentFile = e.currentTarget.files[0];
       setFile(currentFile);
+      // Fetch the ~30 MB core while the user picks settings. Failures are retried on convert.
+      const instance = ffmpegRef.current;
+      if (instance) void loadFFmpeg(instance, () => ffmpegRef.current === instance).catch(() => {});
       const filename = currentFile.name;
       setInputFilename(filename);
       const outputNameBox = document.getElementById('output_name') as HTMLInputElement;

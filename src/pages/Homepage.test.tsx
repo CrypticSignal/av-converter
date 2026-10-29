@@ -3,7 +3,7 @@ import React, { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import Homepage from './Homepage';
-import { convertFile } from '../utils/convertFile';
+import { convertFile, loadFFmpeg } from '../utils/convertFile';
 
 const instances = vi.hoisted(() => [] as { terminate: ReturnType<typeof vi.fn> }[]);
 vi.mock('@ffmpeg/ffmpeg', () => ({
@@ -13,10 +13,11 @@ vi.mock('@ffmpeg/ffmpeg', () => ({
   },
 }));
 vi.mock('../redux/hooks', () => ({ useAppSelector: () => 192, useAppDispatch: () => vi.fn() }));
-vi.mock('../utils/convertFile', () => ({ convertFile: vi.fn() }));
+vi.mock('../utils/convertFile', () => ({ convertFile: vi.fn(), loadFFmpeg: vi.fn() }));
 beforeEach(() => {
   instances.length = 0;
   vi.mocked(convertFile).mockReset().mockResolvedValue(undefined);
+  vi.mocked(loadFFmpeg).mockReset().mockResolvedValue(undefined);
 });
 afterEach(cleanup);
 
@@ -144,4 +145,17 @@ it('uses each format\'s own default bitrate and remembers changes per format', (
   expect(slider().value).toBe('1024');
   expect(convert()).toBe('1024k');
   view.unmount();
+});
+
+it('starts loading FFmpeg when a file is selected and ignores preload failures', async () => {
+  vi.mocked(loadFFmpeg).mockRejectedValue(new Error('offline'));
+  const view = render(<Homepage />);
+  expect(loadFFmpeg).not.toHaveBeenCalled();
+  fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [new File(['audio'], 'input.wav')] } });
+  expect(loadFFmpeg).toHaveBeenCalledWith(instances[0], expect.any(Function));
+  const isActive = vi.mocked(loadFFmpeg).mock.calls[0][1]!;
+  expect(isActive()).toBe(true);
+  await act(async () => {});
+  view.unmount();
+  expect(isActive()).toBe(false);
 });
