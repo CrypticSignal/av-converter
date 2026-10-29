@@ -1,6 +1,7 @@
 import http.client
 from io import BytesIO, StringIO
 import json
+import os
 import socket
 from pathlib import Path
 import subprocess
@@ -40,6 +41,13 @@ class DownloadTests(unittest.TestCase):
         cookies_patch = patch('server.COOKIES_FILE', self.cookies_source)
         cookies_patch.start()
         self.addCleanup(cookies_patch.stop)
+        # Fake processes from Mock() have Mock pids, which os.killpg rejects on POSIX.
+        # Only signal real process groups.
+        real_killpg = getattr(os, 'killpg', None)
+        killpg_patch = patch('server.os.killpg', create=True, side_effect=lambda pid, sig: (
+            None if isinstance(pid, Mock) else real_killpg(pid, sig)))
+        killpg_patch.start()
+        self.addCleanup(killpg_patch.stop)
 
     def tearDown(self):
         self.server.shutdown()
