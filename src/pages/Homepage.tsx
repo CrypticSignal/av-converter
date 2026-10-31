@@ -6,6 +6,7 @@ import type { OperationProgress } from '../utils/progress';
 import Button from '@mui/material/Button';
 import { createFFmpegArgs } from '../utils/createFFmpegArgs';
 import { parseArgs } from '../utils/parseArgs';
+import { formatBytes } from '../utils/progress';
 import { DEFAULT_SETTINGS, FORMATS, bitrateFor, type Codec, type FormatSettings, type StringSetting } from '../formats';
 // General Components
 import FileInput from '../components/FileInput';
@@ -18,6 +19,9 @@ import webAssemblyLogo from '../images/webassembly-25.png';
 import Alert, { AlertColor } from '@mui/material/Alert';
 import Typography from '@mui/material/Typography';
 import Divider from '@mui/material/Divider';
+
+/** The largest input the in-browser FFmpeg can reliably handle. */
+export const MAX_FILE_BYTES = 2 * 1024 ** 3;
 
 const withoutExtension = (filename: string) =>
   filename.includes('.') ? filename.slice(0, filename.lastIndexOf('.')) : filename;
@@ -89,8 +93,17 @@ const Homepage = (): React.JSX.Element => {
 
   const onFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const currentFile = e.currentTarget.files?.[0];
+    if (currentFile && currentFile.size > MAX_FILE_BYTES) {
+      // Clear the input so choosing the same file again still fires a change event.
+      e.currentTarget.value = '';
+      setFile(undefined);
+      setAlert({ severity: 'error', message:
+        `${currentFile.name} is ${formatBytes(currentFile.size)}. The maximum file size is ${formatBytes(MAX_FILE_BYTES)}.` });
+      return;
+    }
     setFile(currentFile);
     if (!currentFile) return;
+    setAlert(null);
     setOutputName(withoutExtension(currentFile.name));
     // Fetch the ~30 MB core while the user picks settings. Failures are retried on convert.
     const instance = ffmpegRef.current;
@@ -171,7 +184,7 @@ const Homepage = (): React.JSX.Element => {
         </div>
       <FileInput onFileInput={onFileInput} filename={inputFilename} />
       <Typography variant="caption" display="block">
-        Max Filesize: 2 GB
+        Max file size: {formatBytes(MAX_FILE_BYTES)}
       </Typography>
       <Divider sx={{ my: 2 }} />
 

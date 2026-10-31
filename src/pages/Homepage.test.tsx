@@ -2,7 +2,7 @@
 import React, { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import Homepage from './Homepage';
+import Homepage, { MAX_FILE_BYTES } from './Homepage';
 import { convertFile, loadFFmpeg } from '../utils/convertFile';
 
 const instances = vi.hoisted(() => [] as { terminate: ReturnType<typeof vi.fn> }[]);
@@ -212,5 +212,26 @@ it('hides the stereo downmix option for formats that copy the audio unchanged', 
   expect(view.queryByText('Downmix to stereo?')).toBeNull();
   fireEvent.change(view.container.querySelector('#codecs')!, { target: { value: 'FLAC' } });
   expect(view.container.querySelector('input[name="downmix"]')).not.toBeNull();
+  view.unmount();
+});
+
+it('rejects files over the size limit when they are selected', () => {
+  const view = render(<Homepage />);
+  const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
+  const big = new File(['video'], 'big.mkv');
+  Object.defineProperty(big, 'size', { value: MAX_FILE_BYTES + 1 });
+  fireEvent.change(input, { target: { files: [big] } });
+  expect(view.getByRole('alert').textContent).toBe('big.mkv is 2.0 GiB. The maximum file size is 2.0 GiB.');
+  expect(view.getByText('Select file')).toBeTruthy();
+  expect(loadFFmpeg).not.toHaveBeenCalled();
+  fireEvent.click(view.getByRole('button', { name: /^convert/i }));
+  expect(convertFile).not.toHaveBeenCalled();
+  expect(view.getByRole('alert').textContent).toBe('You must select an input file.');
+
+  const small = new File(['audio'], 'small.wav');
+  Object.defineProperty(small, 'size', { value: MAX_FILE_BYTES });
+  fireEvent.change(input, { target: { files: [small] } });
+  expect(view.queryByRole('alert')).toBeNull();
+  expect(view.getByText('small.wav')).toBeTruthy();
   view.unmount();
 });
