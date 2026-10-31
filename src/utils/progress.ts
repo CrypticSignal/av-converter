@@ -14,13 +14,17 @@ export function downloadProgress(event: Record<string, unknown>): OperationProgr
   if (event.stage !== 'download' || event.status === 'finished') {
     return { stage: event.stage === 'metadata' ? 'Loading metadata' : 'Postprocessing' };
   }
-  const total = nonnegative(event.total_bytes) && event.total_bytes > 0 ? event.total_bytes : undefined;
+  const positive = (value: unknown): value is number => nonnegative(value) && value > 0;
+  // Many streams (DASH, HLS) only have an estimated size; mark it as approximate.
+  const exact = positive(event.total_bytes);
+  const total = exact ? event.total_bytes as number
+    : positive(event.total_bytes_estimate) ? event.total_bytes_estimate : undefined;
   const bytes = nonnegative(event.downloaded_bytes) ? event.downloaded_bytes : undefined;
   return {
     stage: 'Downloading',
     percent: total !== undefined && bytes !== undefined ? Math.min(100, bytes / total * 100) : undefined,
     speed: nonnegative(event.speed) ? `${(event.speed / 1024).toFixed(1)} KiB/s` : undefined,
     eta: nonnegative(event.eta) ? event.eta : undefined,
-    detail: bytes !== undefined ? `${bytes} bytes${total ? ` / ${total}` : ''}` : undefined,
+    detail: bytes !== undefined ? `${bytes} bytes${total ? ` / ${exact ? '' : '~'}${total}` : ''}` : undefined,
   };
 }

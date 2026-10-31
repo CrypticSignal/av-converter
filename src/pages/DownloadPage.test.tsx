@@ -85,7 +85,7 @@ it('shows structured phases, bounded expandable logs and a native ready download
   start(view);
   await current.send([{ type: 'log', message: 'x'.repeat(100_100) },
     { type: 'progress', stage: 'download', total_bytes_estimate: 100, downloaded_bytes: 50 }]);
-  expect(view.getByRole('progressbar').hasAttribute('aria-valuenow')).toBe(false);
+  expect(view.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('50');
   expect(view.getByLabelText('Operation logs').textContent).toHaveLength(100_000);
   expect(view.container.querySelector('details')!.open).toBe(false);
   fireEvent.click(view.getByText('Show logs'));
