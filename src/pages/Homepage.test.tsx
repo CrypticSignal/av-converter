@@ -203,3 +203,14 @@ it('prefills an editable output name and requires one', () => {
   expect(view.getByRole('alert').textContent).toContain('Please enter an output filename.');
   view.unmount();
 });
+
+it('hides the stereo downmix option for formats that copy the audio unchanged', () => {
+  const view = render(<Homepage />);
+  expect(view.container.querySelector('input[name="downmix"]')).not.toBeNull();
+  fireEvent.change(view.container.querySelector('#codecs')!, { target: { value: 'MKA' } });
+  expect(view.container.querySelector('input[name="downmix"]')).toBeNull();
+  expect(view.queryByText('Downmix to stereo?')).toBeNull();
+  fireEvent.change(view.container.querySelector('#codecs')!, { target: { value: 'FLAC' } });
+  expect(view.container.querySelector('input[name="downmix"]')).not.toBeNull();
+  view.unmount();
+});

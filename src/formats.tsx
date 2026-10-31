@@ -61,6 +61,8 @@ interface Format {
    * 'mp4' keeps an MP4 or MOV input's container (other inputs get MKV), 'mkv' always uses MKV.
    */
   keepVideo?: 'mp4' | 'mkv';
+  /** Set when the audio is copied unchanged, so it cannot be downmixed to stereo. */
+  copiesAudio?: true;
   /** Audio arguments; `bitrate` is the slider value for formats with a bitrate range. */
   args: (settings: FormatSettings, bitrate: string) => string[];
   Panel: (props: PanelProps) => React.ReactNode;
@@ -119,6 +121,7 @@ export const FORMATS: Record<Codec, Format> = {
   MKA: {
     label: 'MKA (.mka)',
     extension: '.mka',
+    copiesAudio: true,
     args: () => ['-map', '0:a', '-c:a', 'copy'],
     Panel: () => <NoSettingsApplicable />,
   },

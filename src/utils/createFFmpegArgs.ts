@@ -19,8 +19,7 @@ export const createFFmpegArgs = (
     const keepsContainer = format.keepVideo === 'mp4' && MP4_FAMILY.includes(inputExtension);
     extension = keepsContainer ? inputExtension : '.mkv';
   }
-  // MKA copies the audio stream unchanged, so it cannot be downmixed.
-  if (settings.downmixToStereo && codec !== 'MKA') args.push('-ac', '2');
+  if (settings.downmixToStereo && !format.copiesAudio) args.push('-ac', '2');
 
   const outputFilename = outputName + extension;
   return { ffmpegArgs: ['-i', inputFilename, ...args, outputFilename], outputFilename };

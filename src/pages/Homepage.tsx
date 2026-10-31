@@ -227,33 +227,35 @@ const Homepage = (): React.JSX.Element => {
             <IsKeepVideo onIsKeepVideoChange={onYesNoChange('isKeepVideo')} isKeepVideo={settings.isKeepVideo} />
           )}
           
-          <div className="my-4">
-            <Typography variant="subtitle1" component="h3" gutterBottom>
-              Downmix to stereo?
-            </Typography>
-            <label className="mr-4">
-              <input
-                type="radio"
-                name="downmix"
-                value="yes"
-                checked={settings.downmixToStereo}
-                onChange={onYesNoChange('downmixToStereo')}
-                className="mr-1"
-              />
-              Yes
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="downmix"
-                value="no"
-                checked={!settings.downmixToStereo}
-                onChange={onYesNoChange('downmixToStereo')}
-                className="mr-1"
-              />
-              No
-            </label>
-          </div>
+          {!format.copiesAudio && (
+            <div className="my-4">
+              <Typography variant="subtitle1" component="h3" gutterBottom>
+                Downmix to stereo?
+              </Typography>
+              <label className="mr-4">
+                <input
+                  type="radio"
+                  name="downmix"
+                  value="yes"
+                  checked={settings.downmixToStereo}
+                  onChange={onYesNoChange('downmixToStereo')}
+                  className="mr-1"
+                />
+                Yes
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="downmix"
+                  value="no"
+                  checked={!settings.downmixToStereo}
+                  onChange={onYesNoChange('downmixToStereo')}
+                  className="mr-1"
+                />
+                No
+              </label>
+            </div>
+          )}
           <Divider sx={{ my: 2 }} />
 
           <Typography variant="h5" component="h2" gutterBottom>

@@ -26,7 +26,7 @@ describe('audio formats and downmix', () => {
       expect(run('my input.webm', codec, { ...settings, downmixToStereo }, 'my output')).toEqual({
         outputFilename,
         ffmpegArgs: ['-i', 'my input.webm', ...args,
-          ...(downmixToStereo && codec !== 'MKA' ? ['-ac', '2'] : []), outputFilename],
+          ...(downmixToStereo && !FORMATS[codec].copiesAudio ? ['-ac', '2'] : []), outputFilename],
       });
     });
   }
