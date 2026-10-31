@@ -1,5 +1,8 @@
 import type { FFFSType, FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
+// The single-threaded core, bundled by Vite as hashed assets.
+import singleThreadCoreURL from '@ffmpeg/core?url';
+import singleThreadWasmURL from '@ffmpeg/core/wasm?url';
 import type { AlertColor } from '@mui/material';
 import { nonnegative, OperationProgress } from './progress';
 
@@ -9,6 +12,26 @@ const INPUT_DIR = '/input';
 const WORKERFS = 'WORKERFS' as FFFSType;
 const ERROR_PATTERN = /error|invalid|unsupported|unknown|not found|no such|could not|unable|cannot|failed/i;
 
+/**
+ * The multi-threaded core needs SharedArrayBuffer, which browsers only provide on
+ * cross-origin isolated pages (served with COOP and COEP headers). Elsewhere, such as
+ * some embedded browsers or behind a proxy that strips the headers, use the slower
+ * single-threaded core instead of failing.
+ */
+export const canUseThreads = (): boolean =>
+  globalThis.crossOriginIsolated === true && typeof SharedArrayBuffer !== 'undefined';
+
+const coreFiles = (): [url: string, type: string][] => canUseThreads()
+  ? [
+      ['/ffmpeg_wasm/ffmpeg-core.js', 'text/javascript'],
+      ['/ffmpeg_wasm/ffmpeg-core.wasm', 'application/wasm'],
+      ['/ffmpeg_wasm/ffmpeg-core.worker.js', 'text/javascript'],
+    ]
+  : [
+      [singleThreadCoreURL, 'text/javascript'],
+      [singleThreadWasmURL, 'application/wasm'],
+    ];
+
 export const loadFFmpeg = (ffmpeg: FFmpeg, isActive = () => true): Promise<void> => {
   const existing = loads.get(ffmpeg);
   if (existing) return existing;
@@ -16,16 +39,14 @@ export const loadFFmpeg = (ffmpeg: FFmpeg, isActive = () => true): Promise<void>
     const urls: string[] = [];
     try {
       // Create sequentially so even a partial failure releases every created URL.
-      for (const [file, type] of [
-        ['ffmpeg-core.js', 'text/javascript'],
-        ['ffmpeg-core.wasm', 'application/wasm'],
-        ['ffmpeg-core.worker.js', 'text/javascript'],
-      ]) {
+      for (const [url, type] of coreFiles()) {
         if (!isActive()) throw new Error('Page unmounted');
-        urls.push(await toBlobURL(`/ffmpeg_wasm/${file}`, type));
+        urls.push(await toBlobURL(url, type));
       }
       if (!isActive()) throw new Error('Page unmounted');
-      await ffmpeg.load({ coreURL: urls[0], wasmURL: urls[1], workerURL: urls[2] });
+      const [coreURL, wasmURL, workerURL] = urls;
+      // The single-threaded core has no worker file.
+      await ffmpeg.load({ coreURL, wasmURL, ...(workerURL && { workerURL }) });
     } finally {
       urls.forEach(url => URL.revokeObjectURL(url));
     }
@@ -88,7 +109,8 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
   const inputPath = `${INPUT_DIR}/${inputFilename}`;
   try {
     checkActive();
-    onAlert('info', 'Loading @ffmpeg/core-mt...');
+    onAlert('info', canUseThreads() ? 'Loading FFmpeg...'
+      : 'Loading FFmpeg. This browser does not allow multi-threading here, so conversion will be slower.');
     report({ stage: 'Loading FFmpeg' });
     await loadFFmpeg(ffmpeg, isActive);
     checkActive();

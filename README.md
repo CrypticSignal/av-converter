@@ -114,6 +114,6 @@ GitHub Actions runs both suites and the production build on every push to master
 | `src/pages/Homepage.tsx` | The converter page. |
 | `src/pages/DownloadPage.tsx` | The video downloader page, which streams progress from the backend. |
 | `downloader/server.py` | The yt-dlp backend. |
-| `public/ffmpeg_wasm/` | The FFmpeg WebAssembly core, served as static files. |
+| `public/ffmpeg_wasm/` | The multi-threaded FFmpeg WebAssembly core, served as static files. Pages that aren't cross-origin isolated (no SharedArrayBuffer) fall back to the single-threaded `@ffmpeg/core`, which Vite bundles. |
 
 To add an output format, add its name to `Codec` and an entry to `FORMATS` in `src/formats.tsx`, then add a row to the table in `src/utils/createFFmpegArgs.test.ts`.

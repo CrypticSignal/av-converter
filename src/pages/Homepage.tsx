@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { convertFile, loadFFmpeg } from '../utils/convertFile';
+import { canUseThreads, convertFile, loadFFmpeg } from '../utils/convertFile';
 import OperationStatus from '../components/OperationStatus';
 import type { OperationProgress } from '../utils/progress';
 import Button from '@mui/material/Button';
@@ -35,7 +35,8 @@ const manualCommandArgs = (inputFilename: string, command: string) => {
   // Directly after the input, -threads is always an option of the first output,
   // whatever the user's command ends with.
   const encodesVideo = restOfArgs.some(arg => ['-c:v', '-c:V', '-codec:v', '-vcodec'].includes(arg));
-  const threads = encodesVideo && !navigator.userAgent.toLowerCase().includes('firefox') ? ['-threads', '4'] : [];
+  const threads = encodesVideo && canUseThreads() && !navigator.userAgent.toLowerCase().includes('firefox')
+    ? ['-threads', '4'] : [];
 
   const ffmpegArgs = ['-i', inputFilename, ...threads, ...restOfArgs];
   const outputFilename = ffmpegArgs[ffmpegArgs.length - 1];

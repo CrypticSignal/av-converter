@@ -3,7 +3,7 @@ import React, { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import Homepage, { MAX_FILE_BYTES } from './Homepage';
-import { convertFile, loadFFmpeg } from '../utils/convertFile';
+import { canUseThreads, convertFile, loadFFmpeg } from '../utils/convertFile';
 
 const instances = vi.hoisted(() => [] as { terminate: ReturnType<typeof vi.fn> }[]);
 vi.mock('@ffmpeg/ffmpeg', () => ({
@@ -12,11 +12,12 @@ vi.mock('@ffmpeg/ffmpeg', () => ({
     constructor() { instances.push(this); }
   },
 }));
-vi.mock('../utils/convertFile', () => ({ convertFile: vi.fn(), loadFFmpeg: vi.fn() }));
+vi.mock('../utils/convertFile', () => ({ convertFile: vi.fn(), loadFFmpeg: vi.fn(), canUseThreads: vi.fn() }));
 beforeEach(() => {
   instances.length = 0;
   vi.mocked(convertFile).mockReset().mockResolvedValue(undefined);
   vi.mocked(loadFFmpeg).mockReset().mockResolvedValue(undefined);
+  vi.mocked(canUseThreads).mockReset().mockReturnValue(true);
 });
 afterEach(cleanup);
 /** The job passed to the nth convertFile call (the latest by default). */
@@ -119,6 +120,12 @@ it('limits video encoder threads right after the input, outside Firefox only', (
   userAgent.mockReturnValue('Mozilla/5.0 Firefox/130.0');
   ({ view } = startManual('-vcodec libx264 out.mp4'));
   expect(job(1).ffmpegArgs).toEqual(['-i', 'input.wav', '-vcodec', 'libx264', 'out.mp4']);
+  view.unmount();
+  // The single-threaded core, used when the page is not cross-origin isolated.
+  userAgent.mockReturnValue('Mozilla/5.0 Chrome/130.0');
+  vi.mocked(canUseThreads).mockReturnValue(false);
+  ({ view } = startManual('-c:v libx264 out.mp4'));
+  expect(job(2).ffmpegArgs).toEqual(['-i', 'input.wav', '-c:v', 'libx264', 'out.mp4']);
   view.unmount();
   userAgent.mockRestore();
 });
