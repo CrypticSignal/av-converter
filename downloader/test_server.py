@@ -13,7 +13,8 @@ import unittest
 from unittest.mock import Mock, patch
 from urllib.parse import unquote, urlencode
 
-from server import (DOWNLOAD_FILES, DOWNLOAD_SLOTS, DownloadFiles, DownloadHandler,
+from server import (DOWNLOAD_FILES, DOWNLOAD_SLOTS, MAX_DOWNLOADS_PER_CLIENT, ClientLimits,
+                    DownloadFiles, DownloadHandler,
                     ThreadingHTTPServer, validate_url, StorageGuard,
                     download_video, DownloadError)
 from server import run_monitored, read_metadata, DOWNLOAD_LINK_SECONDS
@@ -58,10 +59,10 @@ class DownloadTests(unittest.TestCase):
         for output in self.outputs:
             self.assertFalse(output.parent.exists(), 'Temporary directory was not removed')
 
-    def request(self, fields=None, path='/api/download', method='POST'):
+    def request(self, fields=None, path='/api/download', method='POST', headers=None):
         connection = http.client.HTTPConnection(*self.server.server_address, timeout=5)
         connection.request(method, path, urlencode(fields or {'url': 'https://youtu.be/abc'}) if method == 'POST' else None,
-                           {'Content-Type': 'application/x-www-form-urlencoded'})
+                           {'Content-Type': 'application/x-www-form-urlencoded', **(headers or {})})
         response = connection.getresponse()
         result = response.status, dict(response.getheaders()), response.read()
         connection.close()
@@ -305,7 +306,7 @@ class DownloadTests(unittest.TestCase):
                     patch.object(DownloadHandler, 'event', event), \
                     patch('server.DOWNLOAD_SLOTS') as slots:
                 slots.acquire.return_value = True
-                slots.release.side_effect = released.set
+                slots.release.side_effect = lambda client: released.set()
                 if metadata:
                     self.events()
                 else:
@@ -337,7 +338,7 @@ class DownloadTests(unittest.TestCase):
         with patch('server.HEARTBEAT_SECONDS', 0.02), \
                 patch('server.subprocess.Popen', side_effect=spawn), patch('server.DOWNLOAD_SLOTS') as slots:
             slots.acquire.return_value = True
-            slots.release.side_effect = released.set
+            slots.release.side_effect = lambda client: released.set()
             connection = http.client.HTTPConnection(*self.server.server_address, timeout=3)
             try:
                 connection.request('POST', '/api/download', urlencode({'url': 'https://youtu.be/abc'}),
@@ -374,10 +375,10 @@ class DownloadTests(unittest.TestCase):
             with self.subTest(error=error), patch('server.download_video', side_effect=error), \
                     patch('server.DOWNLOAD_SLOTS') as slots, self.assertLogs('server'):
                 slots.acquire.return_value = True
-                slots.release.side_effect = released.set
+                slots.release.side_effect = lambda client: released.set()
                 self.assertEqual(self.events()[-1]['type'], 'error')
                 self.assertTrue(released.wait(timeout=2))
-                slots.release.assert_called_once_with()
+                slots.release.assert_called_once_with('127.0.0.1')
 
     def test_media_failure_removes_partial_files(self):
         def fail(args, *extra, **kwargs):
@@ -397,27 +398,42 @@ class DownloadTests(unittest.TestCase):
                 patch('server.subprocess.Popen', side_effect=self.media):
             self.assertEqual(self.events({'url': url})[-1]['type'], 'ready')
 
-    def test_busy(self):
-        DOWNLOAD_SLOTS.acquire()
-        DOWNLOAD_SLOTS.acquire()
+    def test_per_client_limit(self):
+        for _ in range(MAX_DOWNLOADS_PER_CLIENT):
+            self.assertTrue(DOWNLOAD_SLOTS.acquire('127.0.0.1'))
         try:
-            self.assertEqual(self.request()[0], 429)
+            status, _, body = self.request()
+            self.assertEqual(status, 429)
+            self.assertIn(b'5 downloads in progress', body)
+            # Another visitor, as reported by the local proxy, is unaffected.
+            with patch('server.read_metadata', side_effect=self.metadata), \
+                    patch('server.subprocess.Popen', side_effect=self.media):
+                status, _, body = self.request(headers={'X-Real-IP': '203.0.113.7'})
+                self.assertEqual(status, 200)
+                self.assertEqual(json.loads(body.splitlines()[-1])['type'], 'ready')
         finally:
-            DOWNLOAD_SLOTS.release()
-            DOWNLOAD_SLOTS.release()
+            for _ in range(MAX_DOWNLOADS_PER_CLIENT):
+                DOWNLOAD_SLOTS.release('127.0.0.1')
+        self.assertNotIn('203.0.113.7', DOWNLOAD_SLOTS.active)
 
     def test_storage_admission_releases_slot(self):
+        released = threading.Event()
+        original_release = DOWNLOAD_SLOTS.release
+
+        def release(client):
+            original_release(client)
+            released.set()
+
         with patch('server.STORAGE.check', side_effect=DownloadError('storage quota reached')), \
-                patch('server.download_video') as download, self.assertLogs('server'):
+                patch('server.download_video') as download, \
+                patch.object(DOWNLOAD_SLOTS, 'release', side_effect=release), self.assertLogs('server'):
             status, _, body = self.request()
             self.assertEqual(status, 507)
             self.assertIn(b'quota', body)
             download.assert_not_called()
-        # The handler releases its slot just after responding, so allow it a moment.
-        self.assertTrue(DOWNLOAD_SLOTS.acquire(timeout=5))
-        self.assertTrue(DOWNLOAD_SLOTS.acquire(timeout=5))
-        DOWNLOAD_SLOTS.release()
-        DOWNLOAD_SLOTS.release()
+            # The handler releases its slot just after responding, so allow it a moment.
+            self.assertTrue(released.wait(5))
+        self.assertNotIn('127.0.0.1', DOWNLOAD_SLOTS.active)
 
     def test_unused_link_expires(self):
         store = DownloadFiles()
@@ -435,6 +451,35 @@ class DownloadTests(unittest.TestCase):
             self.assertIsNone(store.take(token))
         finally:
             temporary.cleanup()
+
+
+class ClientLimitTests(unittest.TestCase):
+    def test_limit_is_per_client_and_released(self):
+        limits = ClientLimits(2)
+        self.assertTrue(limits.acquire('a'))
+        self.assertTrue(limits.acquire('a'))
+        self.assertFalse(limits.acquire('a'))
+        self.assertTrue(limits.acquire('b'))
+        limits.release('a')
+        self.assertTrue(limits.acquire('a'))
+        for client in ('a', 'a', 'b'):
+            limits.release(client)
+        self.assertEqual(limits.active, {})
+
+    def client_ip(self, peer, real_ip=None):
+        handler = DownloadHandler.__new__(DownloadHandler)
+        handler.client_address = (peer, 12345)
+        handler.headers = {'X-Real-IP': real_ip} if real_ip is not None else {}
+        return handler.client_ip()
+
+    def test_real_ip_trusted_only_from_local_proxies(self):
+        self.assertEqual(self.client_ip('172.18.0.5', '198.51.100.1'), '198.51.100.1')
+        self.assertEqual(self.client_ip('127.0.0.1', '2001:db8::1'), '2001:db8::1')
+        # A public peer cannot claim another address.
+        self.assertEqual(self.client_ip('8.8.8.8', '1.1.1.1'), '8.8.8.8')
+        # Missing or malformed headers fall back to the peer.
+        self.assertEqual(self.client_ip('172.18.0.5'), '172.18.0.5')
+        self.assertEqual(self.client_ip('172.18.0.5', 'not an ip'), '172.18.0.5')
 
 
 class ResourceTests(unittest.TestCase):

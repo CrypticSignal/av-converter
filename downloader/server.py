@@ -1,4 +1,5 @@
 """Request-based yt-dlp downloads. Files exist only for the current request."""
+import ipaddress
 import json
 import logging
 import mimetypes
@@ -17,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlsplit
 
 LOGGER = logging.getLogger(__name__)
-DOWNLOAD_SLOTS = threading.BoundedSemaphore(2)
+MAX_DOWNLOADS_PER_CLIENT = 5
 # Keep in sync with client_max_body_size in docker/prod/nginx.conf.
 MAX_REQUEST_BYTES = 8 * 1024
 DOWNLOAD_LINK_SECONDS = 10 * 60
@@ -41,6 +42,33 @@ DOWNLOAD_TYPES = {
 
 class DownloadError(Exception):
     """A download failure with a message safe to display to the user."""
+
+
+class ClientLimits:
+    """Count each client's simultaneous downloads; there is no overall limit."""
+
+    def __init__(self, limit):
+        self.limit = limit
+        self.active = {}
+        self.lock = threading.Lock()
+
+    def acquire(self, client):
+        with self.lock:
+            if self.active.get(client, 0) >= self.limit:
+                return False
+            self.active[client] = self.active.get(client, 0) + 1
+            return True
+
+    def release(self, client):
+        with self.lock:
+            remaining = self.active.get(client, 0) - 1
+            if remaining > 0:
+                self.active[client] = remaining
+            else:
+                self.active.pop(client, None)
+
+
+DOWNLOAD_SLOTS = ClientLimits(MAX_DOWNLOADS_PER_CLIENT)
 
 
 class DownloadFiles:
@@ -271,6 +299,22 @@ def download_video(url, download_type, directory, on_output):
 
 
 class DownloadHandler(BaseHTTPRequestHandler):
+    def client_ip(self):
+        """The visitor's address: nginx's X-Real-IP when the request came through a local proxy.
+
+        Only private and loopback peers are trusted to set the header, so a client
+        that reaches this server directly cannot claim another address.
+        """
+        peer = self.client_address[0]
+        forwarded = self.headers.get('X-Real-IP', '').strip()
+        try:
+            peer_address = ipaddress.ip_address(peer)
+            if forwarded and (peer_address.is_private or peer_address.is_loopback):
+                return str(ipaddress.ip_address(forwarded))
+        except ValueError:
+            pass
+        return peer
+
     def error(self, status, message):
         body = json.dumps({'error': message}).encode()
         self.send_response(status)
@@ -335,8 +379,10 @@ class DownloadHandler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeError) as exc:
             self.error(400, str(exc))
             return
-        if not DOWNLOAD_SLOTS.acquire(blocking=False):
-            self.error(429, 'The downloader is busy. Please try again shortly.')
+        client = self.client_ip()
+        if not DOWNLOAD_SLOTS.acquire(client):
+            self.error(429, f'You already have {MAX_DOWNLOADS_PER_CLIENT} downloads in progress. '
+                            'Wait for one to finish, then try again.')
             return
 
         temporary = None
@@ -396,7 +442,7 @@ class DownloadHandler(BaseHTTPRequestHandler):
         finally:
             if temporary and not token:
                 temporary.cleanup()
-            DOWNLOAD_SLOTS.release()
+            DOWNLOAD_SLOTS.release(client)
 
 
 if __name__ == '__main__':

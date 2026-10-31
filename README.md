@@ -73,7 +73,7 @@ Without Docker, use `downloader/cookies.txt`. Each request gets a temporary copy
 
 ## Downloader limits
 
-The backend allows two concurrent extractions. Live recordings have no duration limit, but storage limits still apply.
+Each IP address can run five downloads at once; there is no overall limit. Behind Nginx, the backend reads the visitor's address from `X-Real-IP`, which it accepts only from private or loopback addresses. Live recordings have no duration limit, but storage limits still apply.
 
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
@@ -82,7 +82,7 @@ The backend allows two concurrent extractions. Live recordings have no duration 
 | `DOWNLOAD_MIN_FREE_BYTES` | `1073741824` (1 GiB) | Free space reserve; zero disables it |
 | `DOWNLOAD_STORAGE_CHECK_SECONDS` | `1` | Storage check interval; greater than 0, at most 60 seconds |
 
-Storage checks include partial files, completed files awaiting collection (up to ten minutes), and active transfers. Exceeding a limit stops the affected job and removes its files; retained downloads aren't evicted to make room. Requests rejected because both download slots are busy return HTTP 429; requests rejected for storage limits return HTTP 507.
+Storage checks include partial files, completed files awaiting collection (up to ten minutes), and active transfers. Exceeding a limit stops the affected job and removes its files; retained downloads aren't evicted to make room. Requests over the per-IP limit return HTTP 429; requests rejected for storage limits return HTTP 507.
 
 Checks are periodic, so usage can briefly exceed the limit. Use a filesystem or container storage quota for a strict ceiling, and run only one backend process per storage root.
 
