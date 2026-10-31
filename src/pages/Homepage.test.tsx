@@ -247,3 +247,14 @@ it('shows the running command with arguments quoted for a shell', () => {
     .toBe("Running: ffmpeg -i 'my song.wav' -c:a libmp3lame -b:a 192k 'my song.mp3'...");
   view.unmount();
 });
+
+it('converts a dropped file', () => {
+  const view = render(<Homepage />);
+  const file = new File(['audio'], 'dropped.flac');
+  fireEvent.drop(view.getByTestId('file-drop-zone'), { dataTransfer: { files: [file] } });
+  expect(view.getByText('dropped.flac')).toBeTruthy();
+  expect(view.container.querySelector<HTMLInputElement>('#output_name')!.value).toBe('dropped');
+  fireEvent.click(view.getByRole('button', { name: /^convert/i }));
+  expect(job()).toMatchObject({ file, outputFilename: 'dropped.mp3' });
+  view.unmount();
+});

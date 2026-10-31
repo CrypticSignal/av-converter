@@ -91,11 +91,8 @@ const Homepage = (): React.JSX.Element => {
       update('bitrates', { ...settings.bitrates, [codec]: e.currentTarget.value }),
   };
 
-  const onFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const currentFile = e.currentTarget.files?.[0];
+  const onFile = (currentFile: File | undefined) => {
     if (currentFile && currentFile.size > MAX_FILE_BYTES) {
-      // Clear the input so choosing the same file again still fires a change event.
-      e.currentTarget.value = '';
       setFile(undefined);
       setAlert({ severity: 'error', message:
         `${currentFile.name} is ${formatBytes(currentFile.size)}. The maximum file size is ${formatBytes(MAX_FILE_BYTES)}.` });
@@ -182,7 +179,7 @@ const Homepage = (): React.JSX.Element => {
                 </a>
             </div>
         </div>
-      <FileInput onFileInput={onFileInput} filename={inputFilename} />
+      <FileInput onFile={onFile} filename={inputFilename} />
       <Typography variant="caption" display="block">
         Max file size: {formatBytes(MAX_FILE_BYTES)}
       </Typography>
