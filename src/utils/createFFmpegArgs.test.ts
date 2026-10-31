@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createFFmpegArgs } from './createFFmpegArgs';
+import { createFFmpegArgs, sanitizeFilename } from './createFFmpegArgs';
 import { DEFAULT_SETTINGS, FORMATS, type Codec, type FormatSettings } from '../formats';
 
 const run = (input: string, codec: Codec, settings: Partial<FormatSettings>, outputName = 'output') =>
@@ -85,4 +85,26 @@ describe('keep-video containers', () => {
       },
     );
   }
+});
+
+describe('output filename', () => {
+  it.each([
+    ['plain name', 'plain name'],
+    ['  padded  ', 'padded'],
+    ['a/b\\c', 'a_b_c'],
+    ['what: "now"?', 'what_ _now__'],
+    ['<x|y*z>', '_x_y_z_'],
+    ['tab\there', 'tab_here'],
+    ['-y', '_y'],
+    ['--', '_-'],
+    ['café 日本', 'café 日本'],
+  ])('sanitizes %j to %j', (input, expected) => {
+    expect(sanitizeFilename(input)).toBe(expected);
+  });
+  it('uses the sanitized name for the output argument', () => {
+    expect(run('in.wav', 'WAV', {}, '-dir/name')).toMatchObject({
+      outputFilename: '_dir_name.wav',
+      ffmpegArgs: ['-i', 'in.wav', '-c:a', 'pcm_s16le', '_dir_name.wav'],
+    });
+  });
 });
