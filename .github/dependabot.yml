@@ -32,8 +32,21 @@ updates:
       - /docker/dev
     schedule:
       interval: weekly
+    # Dependabot can't tell LTS from short-lived releases (such as odd-numbered Node
+    # versions), so runtime upgrades are done by hand. Patch updates still arrive.
+    ignore:
+      - dependency-name: node
+        update-types: [version-update:semver-major]
+      - dependency-name: python
+        update-types: [version-update:semver-major, version-update:semver-minor]
+    groups:
+      docker-images:
+        patterns: ['*']
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      github-actions:
+        patterns: ['*']
