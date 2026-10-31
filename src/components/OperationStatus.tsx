@@ -1,5 +1,5 @@
 import { LinearProgress } from '@mui/material';
-import type { OperationProgress } from '../utils/progress';
+import { formatDuration, type OperationProgress } from '../utils/progress';
 
 export default function OperationStatus({ progress, busy, logs }: {
   progress: OperationProgress; busy: boolean; logs: string;
@@ -9,9 +9,9 @@ export default function OperationStatus({ progress, busy, logs }: {
       {progress.stage}
       {progress.percent !== undefined && ` — ${progress.percent.toFixed(1)}%`}
       {progress.detail && ` — ${progress.detail}`}
-      {progress.elapsed !== undefined && ` — Elapsed ${progress.elapsed.toFixed(1)}s`}
+      {progress.elapsed !== undefined && ` — Elapsed ${formatDuration(Math.floor(progress.elapsed))}`}
       {progress.speed !== undefined && ` — Speed ${progress.speed}`}
-      {progress.eta !== undefined && ` — ETA ${Math.ceil(progress.eta)}s`}
+      {progress.eta !== undefined && ` — ETA ${formatDuration(Math.ceil(progress.eta))}`}
     </div>
     {busy && <LinearProgress aria-label="Operation progress"
       variant={progress.percent === undefined ? 'indeterminate' : 'determinate'} value={progress.percent} />}

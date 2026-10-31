@@ -49,9 +49,11 @@ it('aborts pending fetch, restarts immediately and ignores old fetch failure/fin
   await act(async () => old.reject(new Error('old error')));
   expect(view.queryByText('old error')).toBeNull();
   expect(view.getByRole('button', { name: 'Cancel' })).toBeTruthy();
-  await next.send([{ type: 'progress', stage: 'download', total_bytes: 100, downloaded_bytes: 50, speed: 1024, eta: 2 }]);
+  await next.send([{ type: 'progress', stage: 'download', total_bytes: 100, downloaded_bytes: 50, speed: 1024, eta: 3725 }]);
   expect(view.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('50');
-  expect(view.getByRole('status').textContent).toContain('ETA 2s');
+  expect(view.getByRole('status').textContent).toContain('50 B / 100 B');
+  expect(view.getByRole('status').textContent).toContain('Speed 1.0 KiB/s');
+  expect(view.getByRole('status').textContent).toContain('ETA 1h 02m 05s');
   view.unmount();
   expect(vi.mocked(fetch).mock.calls[1][1]!.signal!.aborted).toBe(true);
   await next.send([{ type: 'ready', url: '/late', filename: 'late.mp4' }], true);
