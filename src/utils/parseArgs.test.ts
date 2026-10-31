@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { parseArgs } from './parseArgs';
+import { formatCommand, parseArgs, quoteArg } from './parseArgs';
 
 it.each([
   ['', []],
@@ -21,4 +21,22 @@ it.each([
 
 it.each(['-metadata title="My Song', "'unterminated"])('rejects unterminated quotes in %j', (command) => {
   expect(() => parseArgs(command)).toThrow(/Unterminated/);
+});
+
+it.each([
+  ['out.mp3', 'out.mp3'],
+  ['-c:a', '-c:a'],
+  ['scale=1280:-2,fps=30', 'scale=1280:-2,fps=30'],
+  ['my input.webm', "'my input.webm'"],
+  ['', "''"],
+  ["it's", "'it'\\''s'"],
+  ['$HOME', "'$HOME'"],
+  ['a"b', `'a"b'`],
+])('quotes %j as %j', (arg, expected) => {
+  expect(quoteArg(arg)).toBe(expected);
+});
+
+it('formats commands that parse back to the same arguments', () => {
+  const args = ['-i', 'my input.webm', '-metadata', `title=It's "quoted"`, '', 'back\\slash', 'tab\there', 'out file.mp3'];
+  expect(parseArgs(formatCommand(args))).toEqual(args);
 });

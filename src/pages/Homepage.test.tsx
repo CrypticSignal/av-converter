@@ -235,3 +235,15 @@ it('rejects files over the size limit when they are selected', () => {
   expect(view.getByText('small.wav')).toBeTruthy();
   view.unmount();
 });
+
+it('shows the running command with arguments quoted for a shell', () => {
+  vi.mocked(convertFile).mockImplementation(() => new Promise<void>(() => {}));
+  const view = render(<Homepage />);
+  fireEvent.change(view.container.querySelector('input[type="file"]')!, {
+    target: { files: [new File(['audio'], 'my song.wav')] },
+  });
+  fireEvent.click(view.getByRole('button', { name: /^convert/i }));
+  expect(view.getByText(/^Running:/).textContent)
+    .toBe("Running: ffmpeg -i 'my song.wav' -c:a libmp3lame -b:a 192k 'my song.mp3'...");
+  view.unmount();
+});

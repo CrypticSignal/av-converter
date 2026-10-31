@@ -39,3 +39,13 @@ export const parseArgs = (command: string): string[] => {
   if (inArg) args.push(current);
   return args;
 };
+
+/**
+ * Quote one argument for a POSIX shell, so a displayed command can be pasted into a
+ * terminal (and read back by parseArgs). Plain arguments are left as they are.
+ */
+export const quoteArg = (arg: string): string =>
+  /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`;
+
+/** Join arguments into a shell command line. */
+export const formatCommand = (args: string[]): string => args.map(quoteArg).join(' ');

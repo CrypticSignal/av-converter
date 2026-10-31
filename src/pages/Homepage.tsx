@@ -5,7 +5,7 @@ import OperationStatus from '../components/OperationStatus';
 import type { OperationProgress } from '../utils/progress';
 import Button from '@mui/material/Button';
 import { createFFmpegArgs } from '../utils/createFFmpegArgs';
-import { parseArgs } from '../utils/parseArgs';
+import { formatCommand, parseArgs } from '../utils/parseArgs';
 import { formatBytes } from '../utils/progress';
 import { DEFAULT_SETTINGS, FORMATS, bitrateFor, type Codec, type FormatSettings, type StringSetting } from '../formats';
 // General Components
@@ -143,7 +143,7 @@ const Homepage = (): React.JSX.Element => {
       return;
     }
 
-    setFfmpegCommand(`ffmpeg ${ffmpegArgs.join(' ')}`);
+    setFfmpegCommand(`ffmpeg ${formatCommand(ffmpegArgs)}`);
     const ffmpeg = ffmpegRef.current ?? new FFmpeg();
     ffmpegRef.current = ffmpeg;
     const currentSession = {};
