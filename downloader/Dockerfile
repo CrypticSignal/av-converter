@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim AS node-runtime
+FROM node:25-bookworm-slim AS node-runtime
 
 FROM python:3.12-slim-bookworm
 # Use a supported Node release; Debian's nodejs package can be too old for yt-dlp.
