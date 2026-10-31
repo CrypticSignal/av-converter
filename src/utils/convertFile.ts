@@ -144,7 +144,10 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
     report({ stage: 'Preparing output' });
     const fileData = await ffmpeg.readFile(outputFilename);
     checkActive();
-    const objectURL = URL.createObjectURL(new Blob([fileData as Uint8Array]));
+    const bytes = fileData as Uint8Array;
+    // Blob only accepts views of a plain ArrayBuffer. slice() copies shared memory into one.
+    const blobPart = bytes.buffer instanceof ArrayBuffer ? bytes as Uint8Array<ArrayBuffer> : bytes.slice();
+    const objectURL = URL.createObjectURL(new Blob([blobPart]));
     try {
       const anchor = document.createElement('a');
       anchor.href = objectURL;

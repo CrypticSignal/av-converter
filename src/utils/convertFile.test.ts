@@ -342,3 +342,20 @@ describe('error reporting', () => {
     expect(job.callbacks[0]).toHaveBeenLastCalledWith('error', 'An error occurred during conversion: Out of memory');
   });
 });
+
+describe('output download', () => {
+  it.each([
+    ['a plain buffer', () => new Uint8Array([1, 2, 3])],
+    ['shared memory', () => new Uint8Array(new SharedArrayBuffer(3)).fill(7)],
+  ])('downloads output held in %s', async (_, output) => {
+    const w = worker();
+    const data = output();
+    w.readFile.mockResolvedValueOnce(data);
+    const blobs: Blob[] = [];
+    vi.mocked(URL.createObjectURL).mockImplementation(blob => { blobs.push(blob as Blob); return 'blob:download'; });
+    await run(w).promise;
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledOnce();
+    expect(blobs).toHaveLength(1);
+    expect(new Uint8Array(await blobs[0].arrayBuffer())).toEqual(new Uint8Array(data));
+  });
+});
