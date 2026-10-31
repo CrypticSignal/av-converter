@@ -42,7 +42,7 @@ Open http://localhost:3000. Watch mode syncs frontend changes and restarts or re
 
 #### Without Docker
 
-Install Python 3.12+, Node.js 22+, Yarn, and FFmpeg, with the executables on your PATH. Start the backend:
+Install Python 3.12+, Node.js 26+, Yarn, and FFmpeg, with the executables on your PATH. Start the backend:
 
 ```sh
 python -m pip install -r downloader/requirements.txt

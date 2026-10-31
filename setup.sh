@@ -77,7 +77,7 @@ fi
 
 # ------------------------------------------------------------------------------------------------------------------------------
 
-curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+curl -fsSL https://deb.nodesource.com/setup_26.x | bash -
 log "Installing Node.js..."
 apt-get install -y nodejs
 

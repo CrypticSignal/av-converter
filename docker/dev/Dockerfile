@@ -1,4 +1,6 @@
-FROM node:22-alpine
+FROM node:26-alpine
+# Node 25+ images no longer bundle Yarn or Corepack.
+RUN npm install --global yarn@1.22.22
 
 WORKDIR /app
 

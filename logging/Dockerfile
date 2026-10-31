@@ -1,4 +1,6 @@
-FROM node:24-alpine AS builder
+FROM node:26-alpine AS builder
+# Node 25+ images no longer bundle Yarn or Corepack.
+RUN npm install --global yarn@1.22.22
 
 WORKDIR /app
 
@@ -9,7 +11,9 @@ COPY index.ts ./
 # Complile to JavaScript (index.js)
 RUN npx tsc index.ts
 
-FROM node:24-alpine
+FROM node:26-alpine
+# Node 25+ images no longer bundle Yarn or Corepack.
+RUN npm install --global yarn@1.22.22
 
 ENV NODE_ENV=production
 
