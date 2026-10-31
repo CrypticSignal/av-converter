@@ -1,6 +1,6 @@
 FROM node:22-bookworm-slim AS node-runtime
 
-FROM python:3.12-slim-bookworm
+FROM python:3.15-slim-bookworm
 # Use a supported Node release; Debian's nodejs package can be too old for yt-dlp.
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libstdc++6 ca-certificates && rm -rf /var/lib/apt/lists/*
