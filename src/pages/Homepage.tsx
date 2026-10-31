@@ -181,7 +181,7 @@ const Homepage = (): React.JSX.Element => {
             </div>
         </div>
       <FileInput onFile={onFile} filename={inputFilename} />
-      <Typography variant="caption" display="block">
+      <Typography variant="caption" sx={{ display: 'block' }}>
         Max file size: {formatBytes(MAX_FILE_BYTES)}
       </Typography>
       <Divider sx={{ my: 2 }} />

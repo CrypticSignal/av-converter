@@ -146,7 +146,7 @@ export default function DownloadPage() {
       <Box component="form" onSubmit={download} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         <TextField name="url" label="Video URL" type="url" required fullWidth value={url}
           disabled={busy} onChange={event => setUrl(event.target.value)}
-          placeholder="https://www.youtube.com/watch?v=..." inputProps={{ maxLength: 2048 }} />
+          placeholder="https://www.youtube.com/watch?v=..." slotProps={{ htmlInput: { maxLength: 2048 } }} />
         {url.trim() && <TextField name="format" select label="Download type" value={downloadType}
           disabled={busy} onChange={event => setDownloadType(event.target.value)}
           helperText={DOWNLOAD_TYPES.find(type => type.value === downloadType)?.description}>

@@ -163,3 +163,8 @@ it('does not let delayed reader cleanup finish a restarted request', async () =>
   expect(vi.mocked(fetch).mock.calls[1][1]!.signal!.aborted).toBe(true);
   await next.send([], true);
 });
+
+it('limits the URL field to 2048 characters', () => {
+  const view = render(<DownloadPage />);
+  expect(view.getByLabelText(/Video URL/).getAttribute('maxlength')).toBe('2048');
+});
