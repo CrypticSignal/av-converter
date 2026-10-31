@@ -5,15 +5,15 @@
   "type": "module",
   "dependencies": {
     "@emotion/react": "^11.14.0",
-    "@emotion/styled": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
     "@ffmpeg/core": "^0.12.10",
     "@ffmpeg/core-mt": "^0.12.10",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "@mui/material": "^7.1.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "react-router-dom": "^7.6.0"
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.5"
   },
   "scripts": {
     "test": "vitest run",
@@ -28,9 +28,9 @@
     "docker-dev": "docker compose -f docker/dev/docker-compose.yml up --build --watch"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.1.7",
-    "@testing-library/dom": "10.4.0",
-    "@testing-library/react": "16.1.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
     "@types/node": "^22.20.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
