@@ -11,7 +11,14 @@ app.set('trust proxy', true);
 
 app.post('/logging/visit', async (req: Request, res: Response) => {
     try {
+        // The path comes from the browser, so only accept a short, absolute path.
+        const rawPath = req.body?.path;
+        const path = typeof rawPath === 'string' && rawPath.startsWith('/')
+            ? rawPath.slice(0, 200)
+            : 'Unknown';
+
         const logEntry = {
+            "Path": path,
             "IP": req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
             "Device Model": req.body.deviceModel,
             "Device Platform": req.body.devicePlatform,
