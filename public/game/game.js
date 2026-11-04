@@ -1,3 +1,26 @@
+// Report this visit to the logging service, which forwards it to Loki.
+(async function logVisit() {
+  let deviceModel = "Unknown Device";
+  let devicePlatform = "Unknown Platform";
+
+  if (navigator.userAgentData) {
+    try {
+      // User-Agent Client Hints API
+      const highEntropy = await navigator.userAgentData.getHighEntropyValues(["model", "platform"]);
+      deviceModel = highEntropy.model || "Unknown Device";
+      devicePlatform = highEntropy.platform || "Unknown Platform";
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  fetch("/logging/visit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: location.pathname, deviceModel, devicePlatform }),
+  }).catch((err) => console.error("Logging failed:", err));
+})();
+
 const canvas = document.getElementById("canvas");
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
