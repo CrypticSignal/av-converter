@@ -19,6 +19,12 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 LOGGER = logging.getLogger(__name__)
 MAX_DOWNLOADS_PER_CLIENT = 5
+# Bound yt-dlp/FFmpeg CPU and memory use across all visitors, in addition to
+# per-IP fairness and the independent disk quota. Reject invalid limits at startup.
+MAX_CONCURRENT_DOWNLOADS = int(os.environ.get('DOWNLOAD_MAX_CONCURRENT', '4'))
+if MAX_CONCURRENT_DOWNLOADS <= 0:
+    raise ValueError('DOWNLOAD_MAX_CONCURRENT must be a positive integer.')
+GLOBAL_DOWNLOAD_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_DOWNLOADS)
 # Keep in sync with client_max_body_size in docker/prod/nginx.conf.
 MAX_REQUEST_BYTES = 8 * 1024
 DOWNLOAD_LINK_SECONDS = 10 * 60
@@ -333,11 +339,13 @@ class DownloadHandler(BaseHTTPRequestHandler):
             pass
         return peer
 
-    def error(self, status, message):
+    def error(self, status, message, retry_after=None):
         body = json.dumps({'error': message}).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
+        if retry_after is not None:
+            self.send_header('Retry-After', str(retry_after))
         self.send_header('Cache-Control', 'no-store')
         self.end_headers()
         self.wfile.write(body)
@@ -403,6 +411,14 @@ class DownloadHandler(BaseHTTPRequestHandler):
                             'Wait for one to finish, then try again.')
             return
 
+        # Never queue an unbounded number of expensive jobs. Release the per-IP
+        # reservation if global admission fails, and release both in finally for
+        # every admitted job (success, cancellation, storage breach, or failure).
+        if not GLOBAL_DOWNLOAD_SLOTS.acquire(blocking=False):
+            DOWNLOAD_SLOTS.release(client)
+            self.error(503, 'The download service is busy. Please try again shortly.', retry_after=5)
+            return
+
         temporary = None
         self.event_lock = threading.Lock()
         token = None
@@ -458,9 +474,13 @@ class DownloadHandler(BaseHTTPRequestHandler):
             except ConnectionError:
                 pass
         finally:
-            if temporary and not token:
-                temporary.cleanup()
-            DOWNLOAD_SLOTS.release(client)
+            try:
+                if temporary and not token:
+                    temporary.cleanup()
+            finally:
+                # File cleanup errors must not permanently reduce admission capacity.
+                DOWNLOAD_SLOTS.release(client)
+                GLOBAL_DOWNLOAD_SLOTS.release()
 
 
 if __name__ == '__main__':

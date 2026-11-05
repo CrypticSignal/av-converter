@@ -453,6 +453,58 @@ class DownloadTests(unittest.TestCase):
             temporary.cleanup()
 
 
+    def test_full_server_rejects_without_starting_job_or_leaking_client_slot(self):
+        slots = threading.BoundedSemaphore(1)
+        slots.acquire()
+        with patch('server.GLOBAL_DOWNLOAD_SLOTS', slots), patch('server.download_video') as download:
+            status, headers, body = self.request()
+            self.assertEqual(status, 503)
+            self.assertEqual(headers['Retry-After'], '5')
+            self.assertIn(b'busy', body)
+            download.assert_not_called()
+            self.assertNotIn('127.0.0.1', DOWNLOAD_SLOTS.active)
+        slots.release()
+
+    def test_other_clients_share_global_limit_and_capacity_returns_after_failure(self):
+        slots = threading.BoundedSemaphore(1)
+        started = threading.Event()
+        finish = threading.Event()
+        responses = []
+
+        def fail(*args):
+            started.set()
+            if not finish.wait(5):
+                raise RuntimeError('Test did not release job')
+            raise DownloadError('Expected failure')
+
+        with patch('server.GLOBAL_DOWNLOAD_SLOTS', slots), \
+                patch('server.download_video', side_effect=fail), self.assertLogs('server'):
+            thread = threading.Thread(target=lambda: responses.append(self.request()))
+            thread.start()
+            try:
+                self.assertTrue(started.wait(2))
+                self.assertEqual(self.request(headers={'X-Real-IP': '203.0.113.7'})[0], 503)
+                self.assertNotIn('203.0.113.7', DOWNLOAD_SLOTS.active)
+            finally:
+                finish.set()
+                thread.join(5)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(responses[0][0], 200)
+            self.assertTrue(slots.acquire(timeout=2))
+            slots.release()
+        self.assertNotIn('127.0.0.1', DOWNLOAD_SLOTS.active)
+
+    def test_storage_failure_releases_global_slot(self):
+        slots = threading.BoundedSemaphore(1)
+        with patch('server.GLOBAL_DOWNLOAD_SLOTS', slots), \
+                patch('server.STORAGE.check', side_effect=DownloadError('quota')), self.assertLogs('server'):
+            self.assertEqual(self.request()[0], 507)
+            # The body can arrive before the handler's finally block completes.
+            # Wait for release while the patched semaphore is still installed.
+            self.assertTrue(slots.acquire(timeout=2))
+            slots.release()
+
+
 class ClientLimitTests(unittest.TestCase):
     def test_limit_is_per_client_and_released(self):
         limits = ClientLimits(2)
