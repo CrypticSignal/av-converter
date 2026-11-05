@@ -104,6 +104,11 @@ it('passes quoted manual-mode arguments through intact', () => {
 it.each([
   ['   ', 'Please enter the rest of the command.'],
   ['-metadata title="My Song out.mp3', 'Unterminated " quote in command.'],
+  ['-c:v libx264 out.mp4 -y', 'must end with the output filename (e.g. output.mp4), not the option -y'],
+  ['-c:a libmp3lame music/out.mp3', "can't include a folder"],
+  ["-c:a libmp3lame '..\\out.mp3'", "can't include a folder"],
+  ['-c:a libmp3lame "out?.mp3"', "characters that aren't allowed"],
+  ['-c:a libmp3lame out', 'needs an extension'],
 ])('rejects the manual command %j', (command, message) => {
   const { view } = startManual(command);
   expect(convertFile).not.toHaveBeenCalled();
@@ -111,11 +116,17 @@ it.each([
   view.unmount();
 });
 
+it('accepts an output without an extension when the command names its format', () => {
+  const { view } = startManual('-f mp3 out');
+  expect(job()).toMatchObject({ outputFilename: 'out' });
+  view.unmount();
+});
+
 it('limits video encoder threads right after the input, outside Firefox only', () => {
   const userAgent = vi.spyOn(navigator, 'userAgent', 'get');
   userAgent.mockReturnValue('Mozilla/5.0 Chrome/130.0');
-  let { view } = startManual('-c:v libx264 out.mp4 -y');
-  expect(job(0).ffmpegArgs).toEqual(['-i', 'input.wav', '-threads', '4', '-c:v', 'libx264', 'out.mp4', '-y']);
+  let { view } = startManual('-c:v libx264 -y out.mp4');
+  expect(job(0).ffmpegArgs).toEqual(['-i', 'input.wav', '-threads', '4', '-c:v', 'libx264', '-y', 'out.mp4']);
   view.unmount();
   userAgent.mockReturnValue('Mozilla/5.0 Firefox/130.0');
   ({ view } = startManual('-vcodec libx264 out.mp4'));

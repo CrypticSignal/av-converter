@@ -26,6 +26,23 @@ export const MAX_FILE_BYTES = 2 * 1024 ** 3;
 const withoutExtension = (filename: string) =>
   filename.includes('.') ? filename.slice(0, filename.lastIndexOf('.')) : filename;
 
+/**
+ * The output is read back by the name the command ends with, so reject names that
+ * FFmpeg would treat as an option, write somewhere else, or couldn't pick a format for.
+ */
+const checkManualOutputFilename = (name: string, hasFormatOption: boolean) => {
+  if (name.startsWith('-')) {
+    throw new Error(`The command must end with the output filename (e.g. output.mp4), not the option ${name}.`);
+  }
+  if (/[/\\]/.test(name)) throw new Error(`The output filename ${name} can't include a folder.`);
+  if (/[:*?"<>|\u0000-\u001f]/.test(name)) {
+    throw new Error(`The output filename ${name} contains characters that aren't allowed in filenames.`);
+  }
+  if (!hasFormatOption && !/\.[^.]+$/.test(name)) {
+    throw new Error(`The output filename ${name} needs an extension, such as .mp4, so FFmpeg knows which format to write.`);
+  }
+};
+
 /** Build the arguments for manual mode, where the user types everything after `ffmpeg -i <input>`. */
 const manualCommandArgs = (inputFilename: string, command: string) => {
   const restOfArgs = parseArgs(command);
@@ -40,7 +57,7 @@ const manualCommandArgs = (inputFilename: string, command: string) => {
 
   const ffmpegArgs = ['-i', inputFilename, ...threads, ...restOfArgs];
   const outputFilename = ffmpegArgs[ffmpegArgs.length - 1];
-  if (!outputFilename) throw new Error('Could not parse output filename from command.');
+  checkManualOutputFilename(outputFilename, restOfArgs.includes('-f'));
   return { ffmpegArgs, outputFilename };
 };
 
