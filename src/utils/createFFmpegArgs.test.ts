@@ -108,3 +108,30 @@ describe('output filename', () => {
     });
   });
 });
+
+describe('audio track selection', () => {
+  it.each(Object.keys(FORMATS) as Codec[])('selects an absolute stream index for %s', codec => {
+    const { ffmpegArgs } = createFFmpegArgs('in.mkv', codec, DEFAULT_SETTINGS, 'out', 3);
+    const maps = ffmpegArgs.flatMap((arg, index) => arg === '-map' ? [ffmpegArgs[index + 1]] : []);
+    expect(maps).toEqual(['0:3']);
+  });
+
+  it('keeps video when an audio map disables automatic stream selection', () => {
+    const { ffmpegArgs } = createFFmpegArgs('in.mp4', 'AAC', { ...DEFAULT_SETTINGS, isKeepVideo: true }, 'out', 2);
+    expect(ffmpegArgs).toEqual(['-i', 'in.mp4', '-map', '0:V?', '-map', '0:2',
+      '-c:V', 'copy', '-c:a', 'aac', '-b:a', '192k', 'out.mp4']);
+  });
+
+  it('preserves non-audio streams for FLAC with video without keeping unwanted audio', () => {
+    const { ffmpegArgs } = createFFmpegArgs('in.mkv', 'FLAC', { ...DEFAULT_SETTINGS, isKeepVideo: true }, 'out', 2);
+    expect(ffmpegArgs).toEqual(['-i', 'in.mkv', '-c:V', 'copy', '-map', '0', '-map', '-0:a', '-map', '0:2',
+      '-c:s', 'copy', '-c:a', 'flac', '-compression_level', '5', 'out.mkv']);
+  });
+
+  it('accepts index zero and rejects invalid stream indexes', () => {
+    expect(createFFmpegArgs('in.wav', 'MP3', DEFAULT_SETTINGS, 'out', 0).ffmpegArgs).toContain('0:0');
+    for (const index of [-1, 1.5, NaN, Infinity]) {
+      expect(() => createFFmpegArgs('in.wav', 'MP3', DEFAULT_SETTINGS, 'out', index)).toThrow('valid audio track');
+    }
+  });
+});

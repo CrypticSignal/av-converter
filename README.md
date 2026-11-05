@@ -25,7 +25,7 @@
 
 ## Audio/Video Converter
 
-Convert audio files or the audio tracks in a video using FFmpeg in your browser. Supports AAC, AC3, ALAC, DTS, FLAC, MP3, Opus, Vorbis, and WAV.
+Convert audio files or the audio tracks in a video using FFmpeg in your browser. Supports AAC, AC3, ALAC, DTS, FLAC, MP3, Opus, Vorbis, and WAV. After file information loads, choose an audio track by its stream index, language/title (when available), codec, and channel details. Leaving the default preserves the format's existing mapping, explained below the selector; choosing a track includes only that audio stream. Manual command mode uses your own stream mapping.
 
 ## Video Downloader
 

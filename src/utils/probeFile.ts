@@ -34,6 +34,10 @@ export const parseProbeOutput = (json: string): MediaInfo => {
   };
   const streams = (Array.isArray(data.streams) ? data.streams : []).map((stream, position) => {
     const details: string[] = [];
+    // Language and title distinguish otherwise identical tracks in the picker.
+    const tags = stream.tags as Record<string, unknown> | undefined;
+    if (typeof tags?.language === 'string' && tags.language) details.push(tags.language);
+    if (typeof tags?.title === 'string' && tags.title) details.push(tags.title);
     const sampleRate = positive(stream.sample_rate);
     if (sampleRate) details.push(`${sampleRate} Hz`);
     if (typeof stream.channel_layout === 'string' && stream.channel_layout) details.push(stream.channel_layout);
@@ -79,7 +83,7 @@ export const probeFile = async (ffmpeg: FFmpeg, file: File, isActive: () => bool
       // Quiet, so nothing reaches the log listeners of a conversion started meanwhile.
       '-v', 'info', '-print_format', 'json',
       '-show_entries',
-      'format=duration,format_name,format_long_name:stream=index,codec_type,codec_name,sample_rate,channels,channel_layout,width,height,bit_rate',
+      'format=duration,format_name,format_long_name:stream=index,codec_type,codec_name,sample_rate,channels,channel_layout,width,height,bit_rate:stream_tags=language,title',
       `${PROBE_DIR}/${file.name}`, '-o', PROBE_OUTPUT,
     ], PROBE_TIMEOUT_MS);
     checkActive();

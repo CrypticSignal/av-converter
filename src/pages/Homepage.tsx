@@ -14,6 +14,7 @@ import { FORMATS, bitrateFor, type Codec, type FormatSettings, type StringSettin
 // General Components
 import FileInput from '../components/FileInput';
 import FormatSelector from '../components/FormatSelector';
+import SelectField from '../components/SelectField';
 import IsKeepVideo from '../components/IsKeepVideo';
 import YesNoRadio from '../components/YesNoRadio';
 // Images
@@ -78,6 +79,8 @@ const Homepage = (): React.JSX.Element => {
   const [ffmpegCommand, setFfmpegCommand] = useState('');
   const [file, setFile] = useState<File | undefined>(undefined);
   const [outputName, setOutputName] = useState('');
+  // Track indexes belong to this input file, so never persist them as preferences.
+  const [audioStream, setAudioStream] = useState('');
   const [isConverting, setIsConverting] = useState(false);
   const [manualCommandInput, setManualCommandInput] = useState('');
   const [manualMode, setManualMode] = useState(false);
@@ -135,6 +138,7 @@ const Homepage = (): React.JSX.Element => {
   const onFile = (currentFile: File | undefined) => {
     probeToken.current = null;
     setMediaInfo(null);
+    setAudioStream('');
     if (currentFile && currentFile.size > MAX_FILE_BYTES) {
       setFile(undefined);
       setAlert({ severity: 'error', message:
@@ -187,7 +191,8 @@ const Homepage = (): React.JSX.Element => {
     try {
       ({ ffmpegArgs, outputFilename } = manualMode
         ? manualCommandArgs(file.name, manualCommandInput)
-        : createFFmpegArgs(file.name, codec, settings, outputName.trim()));
+        : createFFmpegArgs(file.name, codec, settings, outputName.trim(),
+          audioStream === '' ? undefined : Number(audioStream)));
     } catch (error) {
       setAlert({ severity: 'error', message: (error as Error).message });
       return;
@@ -283,6 +288,19 @@ const Homepage = (): React.JSX.Element => {
       ) : (
         <>
           <FormatSelector onCodecChange={setCodec} codec={codec} />
+          {mediaInfo?.status === 'ready' && mediaInfo.info.streams.some(stream => stream.type === 'audio') && (
+            <SelectField id="audio_track" label="Audio track" value={audioStream} onChange={setAudioStream}
+              options={[
+                ['', format.mapsAllAudio ? 'Default (all audio tracks)' : 'Automatic (one audio track)'],
+                ...mediaInfo.info.streams.filter(stream => stream.type === 'audio').map(stream => [
+                  String(stream.index),
+                  `Stream ${stream.index}${stream.codec ? ` (${stream.codec})` : ''}${stream.details.length ? ` — ${stream.details.join(', ')}` : ''}`,
+                ] as const),
+              ]}
+              helperText={audioStream !== '' ? 'Only the selected audio track will be included.'
+                : format.mapsAllAudio ? 'This format maps all audio tracks by default. Select one if the output container supports only one track.'
+                : 'FFmpeg automatically selects one audio track. Choose a track to override it.'} />
+          )}
           <Divider sx={{ my: 2 }} />
 
           <Typography variant="h5" component="h2" gutterBottom>
