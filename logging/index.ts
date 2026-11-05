@@ -1,17 +1,27 @@
 import express, { Request, Response } from 'express';
-import cors from 'cors';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const LOKI_URL = 'http://loki:3100/loki/api/v1/push';
 
-app.use(cors());
-app.use(express.json());
+// The page calls this service from the same origin, so no CORS headers are sent:
+// other sites can't read responses or send JSON here from a browser.
+app.use(express.json({ limit: '2kb' }));
 // nginx is the only hop in front of this service. Trusting just that hop makes req.ip
 // the address nginx saw, not the leftmost X-Forwarded-For entry, which visitors can forge.
 app.set('trust proxy', 1);
 
+/** Keep a browser-supplied value only if it is a short string; anything else is discarded. */
+const shortString = (value: unknown, fallback: string, maxLength = 100): string =>
+    typeof value === 'string' && value.trim() ? value.trim().slice(0, maxLength) : fallback;
+
 app.post('/logging/visit', async (req: Request, res: Response) => {
+    // Cross-origin pages can only send JSON after a CORS preflight, which this service
+    // never approves; their simple (non-JSON) requests are refused here.
+    if (!req.is('application/json')) {
+        res.sendStatus(415);
+        return;
+    }
     try {
         // The path comes from the browser, so only accept a short, absolute path.
         const rawPath = req.body?.path;
@@ -22,9 +32,9 @@ app.post('/logging/visit', async (req: Request, res: Response) => {
         const logEntry = {
             "Path": path,
             "IP": req.ip || req.socket.remoteAddress,
-            "Device Model": req.body.deviceModel,
-            "Device Platform": req.body.devicePlatform,
-            "User Agent": req.headers['user-agent'] || 'Unknown'
+            "Device Model": shortString(req.body?.deviceModel, 'Unknown Device'),
+            "Device Platform": shortString(req.body?.devicePlatform, 'Unknown Platform'),
+            "User Agent": shortString(req.headers['user-agent'], 'Unknown', 500)
         };
 
         const lokiPayload = {
