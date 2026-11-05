@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { canUseThreads, convertFile, loadFFmpeg } from '../utils/convertFile';
+import { canUseThreads, convertFile, loadFFmpeg, type ConvertedFile } from '../utils/convertFile';
 import OperationStatus from '../components/OperationStatus';
 import type { OperationProgress } from '../utils/progress';
 import Button from '@mui/material/Button';
@@ -82,6 +82,15 @@ const Homepage = (): React.JSX.Element => {
   // Conversion progress.
   const [status, setStatus] = useState<OperationProgress>({ stage: 'Ready' });
   const [logs, setLogs] = useState('');
+  // The last converted file, kept so it can be downloaded again. Its URL is revoked
+  // when it is replaced and when the page unmounts.
+  const [output, setOutputState] = useState<ConvertedFile | null>(null);
+  const outputURL = useRef<string | null>(null);
+  const setOutput = (next: ConvertedFile | null) => {
+    if (outputURL.current) URL.revokeObjectURL(outputURL.current);
+    outputURL.current = next?.url ?? null;
+    setOutputState(next);
+  };
   // The FFmpeg worker, and a token for the running conversion. Callbacks from a
   // conversion are ignored once either is replaced (on cancel or unmount).
   const ffmpegRef = useRef<FFmpeg | null>(null);
@@ -96,7 +105,11 @@ const Homepage = (): React.JSX.Element => {
 
   useEffect(() => {
     ffmpegRef.current = new FFmpeg();
-    return stopWorker;
+    return () => {
+      stopWorker();
+      if (outputURL.current) URL.revokeObjectURL(outputURL.current);
+      outputURL.current = null;
+    };
   }, []);
 
   useEffect(() => saveSettings({ codec, settings }), [codec, settings]);
@@ -169,6 +182,7 @@ const Homepage = (): React.JSX.Element => {
     session.current = currentSession;
     const isActive = () => session.current === currentSession && ffmpegRef.current === ffmpeg;
     setLogs('');
+    setOutput(null);
     setIsConverting(true);
     void convertFile(ffmpeg, {
       file,
@@ -179,6 +193,10 @@ const Homepage = (): React.JSX.Element => {
       onAlert: (severity, message) => setAlert({ severity, message }),
       onStatus: setStatus,
       onLog: message => setLogs(previous => (previous + message + '\n').slice(-100_000)),
+      onOutput: converted => {
+        if (isActive()) setOutput(converted);
+        else URL.revokeObjectURL(converted.url);
+      },
     }).finally(() => {
       if (!isActive()) return;
       session.current = null;
@@ -286,6 +304,15 @@ const Homepage = (): React.JSX.Element => {
       <OperationStatus progress={status} busy={isConverting} logs={logs} />
       {isConverting && <Button onClick={cancel}>Cancel</Button>}
       {alert && <div className="w-full max-w-xs mx-auto"><Alert severity={alert.severity} sx={{ textAlign: 'center', my: 2, display: 'flex', justifyContent: 'center' }}>{alert.message}</Alert></div>}
+      {output && !isConverting && (
+        <Typography variant="body2">
+          If the download didn't start,{' '}
+          <a href={output.url} download={output.filename} className="underline text-sky-700">
+            download {output.filename}
+          </a>{' '}
+          ({formatBytes(output.size)}).
+        </Typography>
+      )}
 
       <div className={`mt-4 ${!isConverting ? 'block' : 'hidden'}`}>
         <Button variant="contained" onClick={onConvertClicked}>Convert</Button>

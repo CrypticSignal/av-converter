@@ -288,3 +288,22 @@ it('remembers the chosen format and settings for the next visit', () => {
   expect(view.container.querySelector<HTMLInputElement>('input[name="downmix"][value="yes"]')!.checked).toBe(true);
   view.unmount();
 });
+
+it('offers the converted file again and revokes its URL when replaced or unmounted', async () => {
+  const revoke = vi.fn();
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revoke });
+  const view = render(<Homepage />);
+  fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [new File(['a'], 'in.wav')] } });
+  fireEvent.click(view.getByRole('button', { name: /^convert/i }));
+  await act(async () => job().onOutput!({ url: 'blob:first', filename: 'in.mp3', size: 2048 }));
+  const link = view.getByRole('link', { name: 'download in.mp3' });
+  expect(link.getAttribute('href')).toBe('blob:first');
+  expect(link.getAttribute('download')).toBe('in.mp3');
+  expect(view.getByText(/2\.0 KiB/)).toBeTruthy();
+  fireEvent.click(view.getByRole('button', { name: /^convert/i }));
+  expect(revoke).toHaveBeenCalledWith('blob:first');
+  expect(view.queryByRole('link', { name: /download in\.mp3/ })).toBeNull();
+  await act(async () => job().onOutput!({ url: 'blob:second', filename: 'in.mp3', size: 1 }));
+  view.unmount();
+  expect(revoke).toHaveBeenCalledWith('blob:second');
+});

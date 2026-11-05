@@ -249,6 +249,15 @@ describe('conversion cleanup', () => {
     await run(w).promise;
     expect(w.load).toHaveBeenCalledTimes(1);
   });
+  it('hands the download URL to onOutput instead of revoking it', async () => {
+    vi.useFakeTimers();
+    const onOutput = vi.fn();
+    await run(worker(), () => true, { onOutput }).promise;
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledOnce();
+    expect(onOutput).toHaveBeenCalledExactlyOnceWith({ url: 'blob:download', filename: 'out.wav', size: 2 });
+    vi.runAllTimers();
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:download');
+  });
   it.each(['exit', 'write', 'exec', 'read'])('cleans up on %s failure without downloading', async failure => {
     const w = worker();
     if (failure === 'exit') w.exec.mockResolvedValue(1);

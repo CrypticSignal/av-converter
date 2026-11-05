@@ -72,10 +72,22 @@ export interface ConversionJob {
   onAlert: (severity: AlertColor, message: string) => void;
   onStatus: (value: OperationProgress) => void;
   onLog: (message: string) => void;
+  /**
+   * Receives the converted file's object URL after its download starts, so the page can
+   * offer it again. The receiver then owns the URL and must revoke it. Without this
+   * callback the URL is revoked straight after the download starts.
+   */
+  onOutput?: (output: ConvertedFile) => void;
+}
+
+export interface ConvertedFile {
+  url: string;
+  filename: string;
+  size: number;
 }
 
 export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
-  const { file, ffmpegArgs, outputFilename, knownTimeline, isActive, onAlert, onStatus, onLog } = job;
+  const { file, ffmpegArgs, outputFilename, knownTimeline, isActive, onAlert, onStatus, onLog, onOutput } = job;
   const inputFilename = file.name;
   let duration: number | undefined;
   let started: number | undefined;
@@ -150,14 +162,16 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
     const bytes = fileData as Uint8Array;
     // Blob only accepts views of a plain ArrayBuffer. slice() copies shared memory into one.
     const blobPart = bytes.buffer instanceof ArrayBuffer ? bytes as Uint8Array<ArrayBuffer> : bytes.slice();
-    const objectURL = URL.createObjectURL(new Blob([blobPart]));
+    const blob = new Blob([blobPart]);
+    const objectURL = URL.createObjectURL(blob);
     try {
       const anchor = document.createElement('a');
       anchor.href = objectURL;
       anchor.download = outputFilename;
       anchor.click();
     } finally {
-      setTimeout(() => URL.revokeObjectURL(objectURL), 100);
+      if (onOutput) onOutput({ url: objectURL, filename: outputFilename, size: blob.size });
+      else setTimeout(() => URL.revokeObjectURL(objectURL), 100);
     }
     onAlert('success', 'Done! The converted file should have started downloading.');
     report({ stage: 'Conversion complete' });
