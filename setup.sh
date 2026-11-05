@@ -5,6 +5,11 @@ set -euo pipefail
 DOMAIN="av-converter.com"
 EMAIL="theaudiophile@outlook.com"
 
+# Package installation, firewall changes and cron files require root privileges.
+[[ $EUID -eq 0 ]] || { echo "Run with sudo bash setup.sh" >&2; exit 1; }
+# Resolve project-relative paths from this script, regardless of the caller's directory.
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+
 log() {
   local green='\033[0;32m'
   local reset='\033[0m'
@@ -28,31 +33,35 @@ apt-get upgrade -y
 # Docker installation and setup:
 
 log "Installing prerequisites for Docker..."
-apt-get install -y ca-certificates curl gnupg lsb-release dnsutils
-
-log "Setting up Docker GPG keyring directory..."
-install -m 0755 -d /etc/apt/keyrings
-
-log "Downloading Docker GPG key..."
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | tee /etc/apt/keyrings/docker.asc > /dev/null
-chmod a+r /etc/apt/keyrings/docker.asc
-
-log "Adding Docker repository..."
-ARCH=$(dpkg --print-architecture)
-CODENAME=$(source /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
-
-echo "deb [arch=$ARCH signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $CODENAME stable" | \
-  tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-log "Updating package lists..."
-apt-get update -y
+# dnsutils supplies dig; iptables manages host rules; cron restores rules and renews TLS.
+apt-get install -y ca-certificates curl dnsutils iptables cron
 
 if ! command -v docker &> /dev/null; then
-  log "Installing Docker..."
-  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-else
-  log "Docker already installed."
+  log "Installing Docker and Compose from Ubuntu packages..."
+  # Ubuntu packages support this VPS without adding a separate Docker repository.
+  apt-get install -y docker.io docker-compose-v2
 fi
+# Fail early if Docker exists but the required Compose v2 plugin is unavailable.
+docker compose version
+
+# Allow web traffic without removing SSH or Oracle's existing firewall rules.
+log "Allowing HTTP and HTTPS through the host firewall..."
+# -w waits for the firewall lock; -C avoids duplicate rules on repeated runs.
+# Insert missing rules first so Oracle's final INPUT reject does not block them.
+for port in 80 443; do
+  iptables -w -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null ||
+    iptables -w -I INPUT 1 -p tcp --dport "$port" -j ACCEPT
+done
+# Reapply only these IPv4 rules at boot, without saving Docker's dynamic chains.
+# The quoted heredoc writes the commands literally; cron runs them as root.
+cat > /etc/cron.d/av-converter-firewall <<'EOF'
+@reboot root /usr/sbin/iptables -w -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || /usr/sbin/iptables -w -I INPUT 1 -p tcp --dport 80 -j ACCEPT
+@reboot root /usr/sbin/iptables -w -C INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || /usr/sbin/iptables -w -I INPUT 1 -p tcp --dport 443 -j ACCEPT
+EOF
+# Cron files must not be group/world-writable; enable cron now and at boot.
+chmod 644 /etc/cron.d/av-converter-firewall
+systemctl enable --now cron
+log "Also allow TCP 80/443 in Oracle Cloud, and point your domain at this VPS."
 
 log "Checking if Docker is running..."
 if docker info > /dev/null 2>&1; then
@@ -85,10 +94,19 @@ log "Installing yarn..."
 npm install --global yarn
 
 log "Installing dependencies..."
-yarn install
+# Use the committed dependency versions and fail instead of rewriting yarn.lock.
+yarn install --frozen-lockfile
 
 log "Building the project..."
 yarn build
+
+# Production requires this bind-mounted file, even for anonymous downloads.
+if [ ! -e cookies.txt ]; then
+  # An empty Netscape-format file permits anonymous downloads. Existing cookies stay untouched.
+  printf '# Netscape HTTP Cookie File\n' > cookies.txt
+  # Let the non-root downloader container read this new file; it contains no credentials.
+  chmod 644 cookies.txt
+fi
 
 cd docker/prod || exit 1
 
@@ -104,10 +122,44 @@ events {}
 
 http {
     include mime.types;
+    # Shared per-IP request counters used by the logging endpoint below.
+    limit_req_zone $binary_remote_addr zone=visit_logging:10m rate=2r/s;
     
     server {
         listen 80;
         server_name localhost;
+
+        # Send downloader requests to its private container, preserving the API path.
+        location /api/ {
+            # Match the backend form-body limit; preserve visitor IP for per-IP limits.
+            client_max_body_size 8k;
+            proxy_pass http://downloader:8000;
+            proxy_set_header X-Real-IP $remote_addr;
+            # Allow long downloads/recordings and stream progress without proxy buffering.
+            proxy_read_timeout 24h;
+            proxy_buffering off;
+        }
+
+        # Limit tiny visit reports; replace client-supplied forwarding headers to prevent spoofing.
+        location /logging {
+            limit_req zone=visit_logging burst=10 nodelay;
+            limit_req_status 429;
+            client_max_body_size 2k;
+            proxy_pass http://logging:3000;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $remote_addr;
+        }
+
+        # Proxy monitoring, including HTTP/1.1 WebSocket upgrades for live features.
+        location /grafana/ {
+            proxy_pass http://grafana:3000;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        }
 
         location /game {
             root /;
@@ -128,6 +180,7 @@ http {
 }
 EOL
 
+  # Rebuild backend images so startup uses the current source, not a stale image.
   docker compose up --detach --build
   docker compose restart nginx
 
@@ -139,11 +192,14 @@ events {}
 
 http {
     include mime.types;
+    # Shared per-IP request counters used by the logging endpoint below.
+    limit_req_zone $binary_remote_addr zone=visit_logging:10m rate=2r/s;
     
     server {
         listen 80;
         server_name DOMAIN_PLACEHOLDER;
 
+        # Serve certificate validation over HTTP, without requiring an HTTPS redirect.
         location /.well-known/acme-challenge/ {
             root /var/www/certbot;
         }
@@ -154,7 +210,8 @@ EOL
   sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" nginx.conf
 
   log "Restarting Nginx to pick up initial config..."
-  docker compose up --detach
+  # Rebuild backend images so startup uses the current source, not a stale image.
+  docker compose up --detach --build
   docker compose restart nginx
   log "Waiting 3 seconds to give Nginx time to fully start..."
   # Give Nginx time to fully start
@@ -193,10 +250,17 @@ events {}
 
 http {
     include mime.types;
+    # Shared per-IP request counters used by the logging endpoint below.
+    limit_req_zone $binary_remote_addr zone=visit_logging:10m rate=2r/s;
     
     server {
         listen 80;
         server_name DOMAIN_PLACEHOLDER;
+
+        # Serve certificate validation over HTTP, without requiring an HTTPS redirect.
+        location /.well-known/acme-challenge/ {
+            root /var/www/certbot;
+        }
 
         location / {
             return 301 https://$host$request_uri;
@@ -211,6 +275,38 @@ http {
 
         location /.well-known/acme-challenge/ {
             root /var/www/certbot;
+        }
+
+        # Send downloader requests to its private container, preserving the API path.
+        location /api/ {
+            # Match the backend form-body limit; preserve visitor IP for per-IP limits.
+            client_max_body_size 8k;
+            proxy_pass http://downloader:8000;
+            proxy_set_header X-Real-IP $remote_addr;
+            # Allow long downloads/recordings and stream progress without proxy buffering.
+            proxy_read_timeout 24h;
+            proxy_buffering off;
+        }
+
+        # Limit tiny visit reports; replace client-supplied forwarding headers to prevent spoofing.
+        location /logging {
+            limit_req zone=visit_logging burst=10 nodelay;
+            limit_req_status 429;
+            client_max_body_size 2k;
+            proxy_pass http://logging:3000;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $remote_addr;
+        }
+
+        # Proxy monitoring, including HTTP/1.1 WebSocket upgrades for live features.
+        location /grafana/ {
+            proxy_pass http://grafana:3000;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         }
 
         location /game {
@@ -234,8 +330,19 @@ EOL
 
   sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" nginx.conf
 
-  log "Restarting nginx container..."
+  log "Validating and restarting nginx container..."
+  # Validate the new on-disk config in a disposable container before restarting Nginx.
+  docker compose run --rm --no-deps nginx nginx -t
   docker compose restart nginx
+
+  log "Scheduling certificate renewal twice daily..."
+  # A root-only wrapper quotes the absolute script path safely, including spaces.
+  printf '#!/bin/bash\nexec /bin/bash %q\n' "$PWD/renew-cert.sh" > /usr/local/sbin/av-converter-renew
+  chmod 700 /usr/local/sbin/av-converter-renew
+  # Run at 03:15 and 15:15 in the server's timezone; append output to the renewal log.
+  echo '15 3,15 * * * root /usr/local/sbin/av-converter-renew >> /var/log/av-converter-certbot.log 2>&1' > /etc/cron.d/av-converter-certbot
+  # Permit cron to read the schedule without allowing other users to modify it.
+  chmod 644 /etc/cron.d/av-converter-certbot
 fi
 
 log "Setup complete."
