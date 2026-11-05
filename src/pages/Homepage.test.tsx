@@ -14,6 +14,7 @@ vi.mock('@ffmpeg/ffmpeg', () => ({
 }));
 vi.mock('../utils/convertFile', () => ({ convertFile: vi.fn(), loadFFmpeg: vi.fn(), canUseThreads: vi.fn() }));
 beforeEach(() => {
+  localStorage.clear();
   instances.length = 0;
   vi.mocked(convertFile).mockReset().mockResolvedValue(undefined);
   vi.mocked(loadFFmpeg).mockReset().mockResolvedValue(undefined);
@@ -274,5 +275,16 @@ it('converts a dropped file', () => {
   expect(view.container.querySelector<HTMLInputElement>('#output_name')!.value).toBe('dropped');
   fireEvent.click(view.getByRole('button', { name: /^convert/i }));
   expect(job()).toMatchObject({ file, outputFilename: 'dropped.mp3' });
+  view.unmount();
+});
+
+it('remembers the chosen format and settings for the next visit', () => {
+  let view = render(<Homepage />);
+  fireEvent.change(view.container.querySelector('#codecs')!, { target: { value: 'FLAC' } });
+  fireEvent.click(view.container.querySelector('input[name="downmix"][value="yes"]')!);
+  view.unmount();
+  view = render(<Homepage />);
+  expect(view.container.querySelector<HTMLSelectElement>('#codecs')!.value).toBe('FLAC');
+  expect(view.container.querySelector<HTMLInputElement>('input[name="downmix"][value="yes"]')!.checked).toBe(true);
   view.unmount();
 });

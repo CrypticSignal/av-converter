@@ -7,7 +7,8 @@ import Button from '@mui/material/Button';
 import { createFFmpegArgs } from '../utils/createFFmpegArgs';
 import { formatCommand, parseArgs } from '../utils/parseArgs';
 import { formatBytes } from '../utils/progress';
-import { DEFAULT_SETTINGS, FORMATS, bitrateFor, type Codec, type FormatSettings, type StringSetting } from '../formats';
+import { loadSettings, saveSettings } from '../utils/savedSettings';
+import { FORMATS, bitrateFor, type Codec, type FormatSettings, type StringSetting } from '../formats';
 // General Components
 import FileInput from '../components/FileInput';
 import FormatSelector from '../components/FormatSelector';
@@ -68,8 +69,10 @@ const manualCommandArgs = (inputFilename: string, command: string) => {
 
 const Homepage = (): React.JSX.Element => {
   const [alert, setAlert] = useState<{ severity: AlertColor; message: string } | null>(null);
-  const [codec, setCodec] = useState<Codec>('MP3');
-  const [settings, setSettings] = useState<FormatSettings>(DEFAULT_SETTINGS);
+  // Start from the format and settings used last time.
+  const [saved] = useState(loadSettings);
+  const [codec, setCodec] = useState<Codec>(saved.codec);
+  const [settings, setSettings] = useState<FormatSettings>(saved.settings);
   const [ffmpegCommand, setFfmpegCommand] = useState('');
   const [file, setFile] = useState<File | undefined>(undefined);
   const [outputName, setOutputName] = useState('');
@@ -95,6 +98,8 @@ const Homepage = (): React.JSX.Element => {
     ffmpegRef.current = new FFmpeg();
     return stopWorker;
   }, []);
+
+  useEffect(() => saveSettings({ codec, settings }), [codec, settings]);
 
   const inputFilename = file?.name ?? '';
   const format = FORMATS[codec];
