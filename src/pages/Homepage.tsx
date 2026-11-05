@@ -143,7 +143,6 @@ const Homepage = (): React.JSX.Element => {
       return;
     }
 
-    console.clear();
     setAlert(null);
     setFfmpegCommand('');
 
