@@ -596,11 +596,35 @@ class ResourceTests(unittest.TestCase):
             with self.assertRaisesRegex(DownloadError, 'quota'):
                 guard.check()
             partial.unlink()
+            guard.measurement = None  # Measure again rather than wait for the interval.
             guard.check()
             guard.min_free = 100
+            guard.measurement = None
             with patch('server.shutil.disk_usage', return_value=Mock(free=99)):
                 with self.assertRaisesRegex(DownloadError, 'disk space'):
                     guard.check()
+
+    def test_storage_checks_share_one_walk_per_interval(self):
+        with tempfile.TemporaryDirectory() as root:
+            guard = StorageGuard()
+            guard.root = Path(root)
+            guard.quota = 10
+            guard.min_free = 0
+            guard.interval = 60
+            with patch.object(guard, 'measure', wraps=guard.measure) as measure:
+                threads = [threading.Thread(target=guard.check) for _ in range(20)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+                self.assertEqual(measure.call_count, 1)
+                # A file written within the interval is counted at the next measurement.
+                (guard.root / 'video.mp4').write_bytes(b'1234567890')
+                guard.check()
+                with patch('server.time.monotonic', return_value=time.monotonic() + 61):
+                    with self.assertRaisesRegex(DownloadError, 'quota'):
+                        guard.check()
+                self.assertEqual(measure.call_count, 2)
 
     def test_silent_media_is_stopped_on_storage_breach(self):
         released = threading.Event()

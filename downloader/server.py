@@ -106,7 +106,13 @@ DOWNLOAD_FILES = DownloadFiles()
 
 
 class StorageGuard:
-    """Account for every file in the dedicated root, including retained links."""
+    """Account for every file in the dedicated root, including retained links.
+
+    Walking the root costs time proportional to the files in it, and every active
+    download checks once per interval. All checks within an interval therefore share
+    one measurement, so the walk runs at most once per interval however many
+    downloads are running.
+    """
 
     def __init__(self):
         self.root = Path(os.environ.get('DOWNLOAD_STORAGE_DIR',
@@ -116,8 +122,11 @@ class StorageGuard:
         self.interval = float(os.environ.get('DOWNLOAD_STORAGE_CHECK_SECONDS', '1'))
         if self.quota <= 0 or self.min_free < 0 or not 0 < self.interval <= 60:
             raise ValueError('Invalid downloader storage limits.')
+        self.lock = threading.Lock()
+        self.measurement = None  # (measured at, bytes used, bytes free)
 
-    def check(self):
+    def measure(self):
+        """Walk the root and return (bytes used by its files, bytes free on its disk)."""
         self.root.mkdir(parents=True, exist_ok=True)
         used = 0
         for path in self.root.rglob('*'):
@@ -126,9 +135,18 @@ class StorageGuard:
                     used += path.stat().st_size
             except FileNotFoundError:
                 pass  # Another request may have just cleaned up its files.
+        return used, shutil.disk_usage(self.root).free
+
+    def check(self):
+        # Callers that arrive during a walk wait for its result rather than walking too.
+        with self.lock:
+            now = time.monotonic()
+            if self.measurement is None or now - self.measurement[0] >= self.interval:
+                self.measurement = (now, *self.measure())
+            _, used, free = self.measurement
         if used >= self.quota:
             raise DownloadError('Downloader storage quota reached. Please try again later.')
-        if shutil.disk_usage(self.root).free < self.min_free:
+        if free < self.min_free:
             raise DownloadError('Downloader disk space is low. Please try again later.')
 
 
