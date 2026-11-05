@@ -53,10 +53,14 @@ describe('FFmpeg core selection', () => {
     expect(canUseThreads()).toBe(true);
     const w = worker();
     await loadFFmpeg(asFFmpeg(w));
-    expect(vi.mocked(toBlobURL).mock.calls.map(([url]) => url)).toEqual(
-      ['/ffmpeg_wasm/ffmpeg-core.js', '/ffmpeg_wasm/ffmpeg-core.wasm', '/ffmpeg_wasm/ffmpeg-core.worker.js']);
-    expect(w.load).toHaveBeenCalledWith({ coreURL: 'blob:/ffmpeg_wasm/ffmpeg-core.js',
-      wasmURL: 'blob:/ffmpeg_wasm/ffmpeg-core.wasm', workerURL: 'blob:/ffmpeg_wasm/ffmpeg-core.worker.js' });
+    const urls = vi.mocked(toBlobURL).mock.calls.map(([url]) => url);
+    expect(urls).toHaveLength(3);
+    expect(urls.every(url => url.includes('core-mt'))).toBe(true);
+    expect(urls[0]).toMatch(/ffmpeg-core\.js/);
+    expect(urls[1]).toMatch(/ffmpeg-core\.wasm/);
+    expect(urls[2]).toMatch(/ffmpeg-core\.worker\.js/);
+    expect(w.load).toHaveBeenCalledWith({ coreURL: `blob:${urls[0]}`,
+      wasmURL: `blob:${urls[1]}`, workerURL: `blob:${urls[2]}` });
   });
   it.each([[undefined], [false]])('falls back to the bundled single-threaded core when isolation is %s', async isolated => {
     vi.stubGlobal('crossOriginIsolated', isolated);
@@ -65,7 +69,7 @@ describe('FFmpeg core selection', () => {
     await loadFFmpeg(asFFmpeg(w));
     const urls = vi.mocked(toBlobURL).mock.calls.map(([url]) => url);
     expect(urls).toHaveLength(2);
-    expect(urls.some(url => url.startsWith('/ffmpeg_wasm/'))).toBe(false);
+    expect(urls.some(url => url.includes('core-mt'))).toBe(false);
     expect(urls[0]).toMatch(/ffmpeg-core\.js/);
     expect(urls[1]).toMatch(/ffmpeg-core\.wasm/);
     expect(w.load).toHaveBeenCalledWith({ coreURL: `blob:${urls[0]}`, wasmURL: `blob:${urls[1]}` });

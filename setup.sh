@@ -87,10 +87,6 @@ npm install --global yarn
 log "Installing dependencies..."
 yarn install
 
-# https://github.com/ffmpegwasm/ffmpeg.wasm/issues/619#issuecomment-2726185799
-log "Replacing node_modules/@ffmpeg/ffmpeg/dist/esm/worker.js..."
-cp public/ffmpeg_wasm/worker.js node_modules/@ffmpeg/ffmpeg/dist/esm/worker.js
-
 log "Building the project..."
 yarn build
 
@@ -112,13 +108,6 @@ http {
     server {
         listen 80;
         server_name localhost;
-
-        location /ffmpeg_wasm {
-            add_header 'Cross-Origin-Embedder-Policy' 'require-corp';
-            add_header 'Cross-Origin-Opener-Policy' 'same-origin';
-            alias /ffmpeg_wasm/;
-            try_files $uri =404;
-        }
 
         location /game {
             root /;
@@ -219,13 +208,6 @@ http {
         server_name DOMAIN_PLACEHOLDER;
         ssl_certificate     /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem;
         ssl_certificate_key /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/privkey.pem;
-
-        location /ffmpeg_wasm {
-            add_header 'Cross-Origin-Embedder-Policy' 'require-corp';
-            add_header 'Cross-Origin-Opener-Policy' 'same-origin';
-            alias /ffmpeg_wasm/;
-            try_files $uri =404;
-        }
 
         location /.well-known/acme-challenge/ {
             root /var/www/certbot;

@@ -1,8 +1,11 @@
 import type { FFFSType, FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
-// The single-threaded core, bundled by Vite as hashed assets.
+// Both cores are bundled by Vite as content-hashed assets, so browsers can cache them for good.
 import singleThreadCoreURL from '@ffmpeg/core?url';
 import singleThreadWasmURL from '@ffmpeg/core/wasm?url';
+import multiThreadCoreURL from '@ffmpeg/core-mt?url';
+import multiThreadWasmURL from '@ffmpeg/core-mt/wasm?url';
+import multiThreadWorkerURL from '@ffmpeg/core-mt/worker?url';
 import type { AlertColor } from '@mui/material';
 import { nonnegative, OperationProgress } from './progress';
 
@@ -23,9 +26,9 @@ export const canUseThreads = (): boolean =>
 
 const coreFiles = (): [url: string, type: string][] => canUseThreads()
   ? [
-      ['/ffmpeg_wasm/ffmpeg-core.js', 'text/javascript'],
-      ['/ffmpeg_wasm/ffmpeg-core.wasm', 'application/wasm'],
-      ['/ffmpeg_wasm/ffmpeg-core.worker.js', 'text/javascript'],
+      [multiThreadCoreURL, 'text/javascript'],
+      [multiThreadWasmURL, 'application/wasm'],
+      [multiThreadWorkerURL, 'text/javascript'],
     ]
   : [
       [singleThreadCoreURL, 'text/javascript'],
