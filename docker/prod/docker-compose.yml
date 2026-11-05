@@ -6,6 +6,8 @@ services:
     cpus: "2.0"
     mem_limit: 2g
     environment:
+      # Bound expensive jobs across all visitors; the per-IP limit still applies.
+      DOWNLOAD_MAX_CONCURRENT: ${DOWNLOAD_MAX_CONCURRENT:-4}
       DOWNLOAD_STORAGE_DIR: /tmp/av-downloader
       DOWNLOAD_STORAGE_QUOTA_BYTES: ${DOWNLOAD_STORAGE_QUOTA_BYTES:-10737418240}
       DOWNLOAD_MIN_FREE_BYTES: ${DOWNLOAD_MIN_FREE_BYTES:-1073741824}
