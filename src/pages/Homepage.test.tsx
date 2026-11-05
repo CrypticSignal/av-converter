@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import Homepage, { MAX_FILE_BYTES } from './Homepage';
 import { canUseThreads, convertFile, loadFFmpeg } from '../utils/convertFile';
+import { probeFile, type MediaInfo } from '../utils/probeFile';
 
 const instances = vi.hoisted(() => [] as { terminate: ReturnType<typeof vi.fn> }[]);
 vi.mock('@ffmpeg/ffmpeg', () => ({
@@ -13,12 +14,14 @@ vi.mock('@ffmpeg/ffmpeg', () => ({
   },
 }));
 vi.mock('../utils/convertFile', () => ({ convertFile: vi.fn(), loadFFmpeg: vi.fn(), canUseThreads: vi.fn() }));
+vi.mock('../utils/probeFile', () => ({ probeFile: vi.fn() }));
 beforeEach(() => {
   localStorage.clear();
   instances.length = 0;
   vi.mocked(convertFile).mockReset().mockResolvedValue(undefined);
   vi.mocked(loadFFmpeg).mockReset().mockResolvedValue(undefined);
   vi.mocked(canUseThreads).mockReset().mockReturnValue(true);
+  vi.mocked(probeFile).mockReset().mockReturnValue(new Promise(() => {}));
 });
 afterEach(cleanup);
 /** The job passed to the nth convertFile call (the latest by default). */
@@ -306,4 +309,28 @@ it('offers the converted file again and revokes its URL when replaced or unmount
   await act(async () => job().onOutput!({ url: 'blob:second', filename: 'in.mp3', size: 1 }));
   view.unmount();
   expect(revoke).toHaveBeenCalledWith('blob:second');
+});
+
+it('shows the selected file\'s duration and streams, ignoring results for an older file', async () => {
+  let finishFirst!: (info: MediaInfo) => void;
+  vi.mocked(probeFile)
+    .mockReturnValueOnce(new Promise<MediaInfo>(resolve => { finishFirst = resolve; }))
+    .mockResolvedValueOnce({
+      duration: 65, format: 'WAV / WAVE (Waveform Audio)',
+      streams: [{ index: 0, type: 'audio', codec: 'pcm_s16le', details: ['44100 Hz', 'stereo'] }],
+    })
+    .mockRejectedValueOnce(new Error('unreadable'));
+  const view = render(<Homepage />);
+  const input = view.container.querySelector('input[type="file"]')!;
+  fireEvent.change(input, { target: { files: [new File(['a'], 'first.wav')] } });
+  expect(view.getByText('Reading file information…')).toBeTruthy();
+  await act(async () => { fireEvent.change(input, { target: { files: [new File(['b'], 'second.wav')] } }); });
+  const info = view.getByLabelText('File information');
+  expect(info.textContent).toContain('Duration: 1m 05s · Format: WAV / WAVE (Waveform Audio)');
+  expect(info.textContent).toContain('Stream 0: Audio (pcm_s16le) — 44100 Hz, stereo');
+  await act(async () => finishFirst({ duration: 1, streams: [] }));
+  expect(view.getByLabelText('File information').textContent).toContain('1m 05s');
+  await act(async () => { fireEvent.change(input, { target: { files: [new File(['c'], 'third.bin')] } }); });
+  expect(view.getByText("Couldn't read this file's information.")).toBeTruthy();
+  view.unmount();
 });

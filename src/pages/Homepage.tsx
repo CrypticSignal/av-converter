@@ -8,6 +8,8 @@ import { createFFmpegArgs } from '../utils/createFFmpegArgs';
 import { formatCommand, parseArgs } from '../utils/parseArgs';
 import { formatBytes } from '../utils/progress';
 import { loadSettings, saveSettings } from '../utils/savedSettings';
+import { probeFile } from '../utils/probeFile';
+import MediaInfoPanel, { type MediaInfoState } from '../components/MediaInfoPanel';
 import { FORMATS, bitrateFor, type Codec, type FormatSettings, type StringSetting } from '../formats';
 // General Components
 import FileInput from '../components/FileInput';
@@ -82,6 +84,9 @@ const Homepage = (): React.JSX.Element => {
   // Conversion progress.
   const [status, setStatus] = useState<OperationProgress>({ stage: 'Ready' });
   const [logs, setLogs] = useState('');
+  // What ffprobe found in the selected file; a token ignores results for an older file.
+  const [mediaInfo, setMediaInfo] = useState<MediaInfoState | null>(null);
+  const probeToken = useRef<object | null>(null);
   // The last converted file, kept so it can be downloaded again. Its URL is revoked
   // when it is replaced and when the page unmounts.
   const [output, setOutputState] = useState<ConvertedFile | null>(null);
@@ -128,6 +133,8 @@ const Homepage = (): React.JSX.Element => {
   };
 
   const onFile = (currentFile: File | undefined) => {
+    probeToken.current = null;
+    setMediaInfo(null);
     if (currentFile && currentFile.size > MAX_FILE_BYTES) {
       setFile(undefined);
       setAlert({ severity: 'error', message:
@@ -139,8 +146,19 @@ const Homepage = (): React.JSX.Element => {
     setAlert(null);
     setOutputName(withoutExtension(currentFile.name));
     // Fetch the ~30 MB core while the user picks settings. Failures are retried on convert.
-    const instance = ffmpegRef.current;
-    if (instance) void loadFFmpeg(instance, () => ffmpegRef.current === instance).catch(() => {});
+    const instance = ffmpegRef.current ?? new FFmpeg();
+    ffmpegRef.current = instance;
+    void loadFFmpeg(instance, () => ffmpegRef.current === instance).catch(() => {});
+    // Then show the file's duration and streams. A conversion started meanwhile is
+    // unaffected: the worker runs one command at a time and the probe uses its own paths.
+    const token = {};
+    probeToken.current = token;
+    const probeActive = () => probeToken.current === token && ffmpegRef.current === instance;
+    setMediaInfo({ status: 'loading' });
+    probeFile(instance, currentFile, probeActive).then(
+      info => { if (probeActive()) setMediaInfo({ status: 'ready', info }); },
+      () => { if (probeActive()) setMediaInfo({ status: 'failed' }); },
+    );
   };
 
   const cancel = () => {
@@ -220,6 +238,7 @@ const Homepage = (): React.JSX.Element => {
             </div>
         </div>
       <FileInput onFile={onFile} filename={inputFilename} />
+      {mediaInfo && <MediaInfoPanel state={mediaInfo} />}
       <Typography variant="caption" sx={{ display: 'block' }}>
         Max file size: {formatBytes(MAX_FILE_BYTES)}
       </Typography>
