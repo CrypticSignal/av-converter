@@ -41,3 +41,20 @@ it('passes a picked file, resets the input, and accepts any audio or video type'
   expect(onFile).toHaveBeenCalledExactlyOnceWith(file);
   expect(input.value).toBe('');
 });
+
+it('ignores drag-and-drop while disabled and accepts files again when enabled', () => {
+  const onFile = vi.fn();
+  const view = render(<FileInput onFile={onFile} filename="current.wav" disabled />);
+  const zone = view.getByTestId('file-drop-zone');
+  const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
+  const file = new File(['audio'], 'replacement.wav');
+  expect(input.disabled).toBe(true);
+  fireEvent.dragEnter(zone, { dataTransfer: { files: [file] } });
+  expect(view.queryByText('Drop to select this file')).toBeNull();
+  fireEvent.drop(zone, { dataTransfer: { files: [file] } });
+  expect(onFile).not.toHaveBeenCalled();
+  view.rerender(<FileInput onFile={onFile} filename="current.wav" />);
+  expect(input.disabled).toBe(false);
+  fireEvent.drop(zone, { dataTransfer: { files: [file] } });
+  expect(onFile).toHaveBeenCalledExactlyOnceWith(file);
+});

@@ -136,6 +136,7 @@ const Homepage = (): React.JSX.Element => {
   };
 
   const onFile = (currentFile: File | undefined) => {
+    if (session.current) return;
     probeToken.current = null;
     setMediaInfo(null);
     setAudioStream('');
@@ -242,7 +243,10 @@ const Homepage = (): React.JSX.Element => {
                 </a>
             </div>
         </div>
-      <FileInput onFile={onFile} filename={inputFilename} />
+      {/* Freeze every native settings control for the lifetime of this job. Keep
+          status and Cancel outside the fieldset so cancellation stays available. */}
+      <fieldset disabled={isConverting} aria-label="Conversion settings" className="border-0 m-0 p-0 min-w-0">
+      <FileInput onFile={onFile} filename={inputFilename} disabled={isConverting} />
       {mediaInfo && <MediaInfoPanel state={mediaInfo} />}
       <Typography variant="caption" sx={{ display: 'block' }}>
         Max file size: {formatBytes(MAX_FILE_BYTES)}
@@ -333,6 +337,8 @@ const Homepage = (): React.JSX.Element => {
           />
         </>
       )}
+
+      </fieldset>
 
       <div className={`text-center my-4 ${isConverting ? 'block' : 'hidden'}`}>
         {ffmpegCommand && <>Running: {ffmpegCommand}...</>}

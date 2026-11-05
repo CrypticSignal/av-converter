@@ -6,6 +6,7 @@ interface FileInputProps {
   /** Called with the chosen or dropped file. */
   onFile: (file: File | undefined) => void;
   filename: string;
+  disabled?: boolean;
 }
 
 const VisuallyHiddenInput = styled("input")({
@@ -29,12 +30,15 @@ const ACCEPT = [
   ".rm", ".spx", ".thd", ".ts", ".tta", ".vob", ".w64", ".wav", ".webm", ".wma", ".wmv", ".wv",
 ].join(",");
 
-const FileInput: React.FC<FileInputProps> = ({ onFile, filename }) => {
+const FileInput: React.FC<FileInputProps> = ({ onFile, filename, disabled = false }) => {
   const [dragging, setDragging] = useState(false);
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
+    // A disabled fieldset blocks native controls, but drag events still fire.
+    // Ignore dropped files too so the visible input cannot change mid-conversion.
+    if (disabled) return;
     const file = e.dataTransfer.files[0];
     if (file) onFile(file);
   };
@@ -42,8 +46,8 @@ const FileInput: React.FC<FileInputProps> = ({ onFile, filename }) => {
   return (
     <div
       data-testid="file-drop-zone"
-      onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
-      onDragEnter={e => { e.preventDefault(); setDragging(true); }}
+      onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = disabled ? "none" : "copy"; }}
+      onDragEnter={e => { e.preventDefault(); setDragging(!disabled); }}
       onDragLeave={e => {
         // Ignore leaving into a child element; only clear when the pointer leaves the zone.
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
@@ -53,6 +57,7 @@ const FileInput: React.FC<FileInputProps> = ({ onFile, filename }) => {
         dragging ? "border-sky-500 bg-sky-50" : "border-gray-300"}`}
     >
       <Button
+        disabled={disabled}
         component="label"
         role={undefined}
         variant="contained"
@@ -61,6 +66,7 @@ const FileInput: React.FC<FileInputProps> = ({ onFile, filename }) => {
       >
         {filename || "Select file"}
         <VisuallyHiddenInput
+          disabled={disabled}
           accept={ACCEPT}
           type="file"
           onChange={e => {
