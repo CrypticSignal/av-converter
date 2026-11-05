@@ -26,6 +26,13 @@ const worker = () => ({
 });
 
 describe('parseProbeOutput', () => {
+  it('includes track language and title when present and ignores malformed tags', () => {
+    const info = parseProbeOutput(JSON.stringify({ streams: [
+      { codec_type: 'audio', tags: { language: 'fra', title: 'Commentary' } },
+      { codec_type: 'audio', tags: { language: 123, title: '' } },
+    ] }));
+    expect(info.streams.map(stream => stream.details)).toEqual([['fra', 'Commentary'], []]);
+  });
   it('summarises the format, duration and each stream', () => {
     expect(parseProbeOutput(PROBE_JSON)).toEqual({
       duration: 125.5,

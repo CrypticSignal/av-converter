@@ -63,6 +63,8 @@ interface Format {
   keepVideo?: 'mp4' | 'mkv';
   /** Set when the audio is copied unchanged, so it cannot be downmixed to stereo. */
   copiesAudio?: true;
+  /** The default mapping keeps all audio streams rather than FFmpeg's choice of one. */
+  mapsAllAudio?: true;
   /** Audio arguments; `bitrate` is the slider value for formats with a bitrate range. */
   args: (settings: FormatSettings, bitrate: string) => string[];
   Panel: (props: PanelProps) => React.ReactNode;
@@ -107,6 +109,7 @@ export const FORMATS: Record<Codec, Format> = {
     Panel: ({ bitrate }) => <DTS bitrate={bitrate!} />,
   },
   FLAC: {
+    mapsAllAudio: true,
     label: 'FLAC (.flac)',
     extension: '.flac',
     keepVideo: 'mkv',
@@ -119,6 +122,7 @@ export const FORMATS: Record<Codec, Format> = {
       <FLAC onFlacCompressionChange={onChange('flacCompression')} flacCompression={settings.flacCompression} />,
   },
   MKA: {
+    mapsAllAudio: true,
     label: 'MKA (.mka)',
     extension: '.mka',
     copiesAudio: true,
@@ -156,6 +160,7 @@ export const FORMATS: Record<Codec, Format> = {
     ),
   },
   Vorbis: {
+    mapsAllAudio: true,
     label: 'Vorbis (.ogg)',
     extension: '.ogg',
     bitrate: { initial: '192', min: '32', max: '480', step: '32' },

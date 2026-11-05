@@ -16,6 +16,7 @@ export const createFFmpegArgs = (
   codec: Codec,
   settings: FormatSettings,
   outputName: string,
+  audioStream?: number,
 ): { ffmpegArgs: string[]; outputFilename: string } => {
   const format = FORMATS[codec];
   const args = format.args(settings, bitrateFor(codec, settings));
@@ -26,6 +27,26 @@ export const createFFmpegArgs = (
     const inputExtension = inputFilename.slice(inputFilename.lastIndexOf('.')).toLowerCase();
     const keepsContainer = format.keepVideo === 'mp4' && MP4_FAMILY.includes(inputExtension);
     extension = keepsContainer ? inputExtension : '.mkv';
+  }
+  if (audioStream !== undefined) {
+    if (!Number.isSafeInteger(audioStream) || audioStream < 0) {
+      throw new Error('Choose a valid audio track.');
+    }
+    // ffprobe reports absolute stream indexes, not audio-only positions. Replace
+    // the format's broad audio mapping so selecting a track never duplicates it.
+    const mapping = args.indexOf('-map');
+    if (mapping >= 0 && args[mapping + 1] === '0') {
+      // FLAC with video keeps subtitles/attachments too: remove only its audio
+      // streams, then add the selected one, preserving all other stream types.
+      args.splice(mapping + 2, 0, '-map', '-0:a', '-map', `0:${audioStream}`);
+    } else if (mapping >= 0) {
+      args[mapping + 1] = `0:${audioStream}`;
+    } else {
+      // An explicit audio map disables FFmpeg's automatic video selection. Add
+      // video back only when requested; '?' also allows audio-only inputs.
+      args.unshift(...(format.keepVideo && settings.isKeepVideo ? ['-map', '0:V?'] : []),
+        '-map', `0:${audioStream}`);
+    }
   }
   if (settings.downmixToStereo && !format.copiesAudio) args.push('-ac', '2');
 

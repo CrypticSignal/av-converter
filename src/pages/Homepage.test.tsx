@@ -334,3 +334,39 @@ it('shows the selected file\'s duration and streams, ignoring results for an old
   expect(view.getByText("Couldn't read this file's information.")).toBeTruthy();
   view.unmount();
 });
+
+it('selects an audio stream, explains format defaults, and resets selection for a new input', async () => {
+  vi.mocked(probeFile).mockResolvedValue({ streams: [
+    { index: 0, type: 'video', codec: 'h264', details: [] },
+    { index: 1, type: 'audio', codec: 'aac', details: ['English'] },
+    { index: 3, type: 'audio', codec: 'aac', details: ['French'] },
+  ] });
+  const view = render(<Homepage />);
+  await act(async () => { selectFile(view, 'first.mkv'); });
+  const track = view.getByLabelText('Audio track') as HTMLSelectElement;
+  expect(Array.from(track.options, option => option.value)).toEqual(['', '1', '3']);
+  expect(view.getByText(/FFmpeg automatically selects one audio track/)).toBeTruthy();
+  fireEvent.change(view.container.querySelector('#codecs')!, { target: { value: 'MKA' } });
+  expect(view.getByText(/This format maps all audio tracks by default/)).toBeTruthy();
+  fireEvent.change(track, { target: { value: '3' } });
+  expect(view.getByText('Only the selected audio track will be included.')).toBeTruthy();
+  fireEvent.click(view.getByRole('button', { name: /^convert/i }));
+  expect(job().ffmpegArgs).toEqual(['-i', 'first.mkv', '-map', '0:3', '-c:a', 'copy', 'first.mka']);
+  await act(async () => {});
+  await act(async () => { selectFile(view, 'second.mkv'); });
+  expect((view.getByLabelText('Audio track') as HTMLSelectElement).value).toBe('');
+  view.unmount();
+});
+
+it('leaves stream mapping to the user in manual command mode', async () => {
+  vi.mocked(probeFile).mockResolvedValue({ streams: [{ index: 2, type: 'audio', details: [] }] });
+  const view = render(<Homepage />);
+  await act(async () => { selectFile(view, 'input.mkv'); });
+  fireEvent.change(view.getByLabelText('Audio track'), { target: { value: '2' } });
+  fireEvent.click(view.getByLabelText('Manual FFmpeg Command'));
+  expect(view.queryByLabelText('Audio track')).toBeNull();
+  fireEvent.change(view.getByPlaceholderText('-c:v libx264 output.mp4'), { target: { value: '-map 0:1 -c:a copy out.mka' } });
+  fireEvent.click(view.getByRole('button', { name: /^convert/i }));
+  expect(job().ffmpegArgs).toEqual(['-i', 'input.mkv', '-map', '0:1', '-c:a', 'copy', 'out.mka']);
+  view.unmount();
+});
