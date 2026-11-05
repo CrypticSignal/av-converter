@@ -1,45 +1,35 @@
-import React from 'react';
 import BitrateSlider, { type BitrateSliderProps } from '../BitrateSlider';
+import SelectField from '../SelectField';
 import VbrDropdown from './VbrDropdown';
 
 interface MP3EncodingTypeSelectorProps {
-  onEncodingTypeChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  onEncodingTypeChange: (value: string) => void;
   encodingType: string;
-  onVbrSettingChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  onVbrSettingChange: (value: string) => void;
   vbrSetting: string;
   bitrate: BitrateSliderProps;
 }
 
-const MP3EncodingTypeSelector: React.FC<MP3EncodingTypeSelectorProps> = ({
+const ENCODING_TYPES = [
+  ['cbr', 'CBR (Constant Bitrate)'],
+  ['abr', 'ABR (Average Bitrate)'],
+  ['vbr', 'VBR (Variable Bitrate)'],
+] as const;
+
+const MP3EncodingTypeSelector = ({
   onEncodingTypeChange,
   encodingType,
   onVbrSettingChange,
   vbrSetting,
   bitrate,
-}) => {
-  return (
-    <div id='mp3_encoding_div'>
-      <label htmlFor='mp3_encoding_type'>Encoding Type:</label>
-      <select
-        value={encodingType}
-        id='mp3_encoding_type'
-        onChange={onEncodingTypeChange}
-      >
-        <option disabled>Select encoding type</option>
-        <option value='cbr'>CBR (Constant Bitrate)</option>
-        <option value='abr'>ABR (Average Bitrate)</option>
-        <option value='vbr'>VBR (Variable Bitrate)</option>
-      </select>
-      {encodingType === 'vbr' ? (
-        <VbrDropdown
-          onVbrSettingChange={onVbrSettingChange}
-          vbrSetting={vbrSetting}
-        />
-      ) : (
-        <BitrateSlider {...bitrate} />
-      )}
-    </div>
-  );
-};
+}: MP3EncodingTypeSelectorProps) => (
+  <div id='mp3_encoding_div'>
+    <SelectField id='mp3_encoding_type' label='Encoding type' value={encodingType}
+      onChange={onEncodingTypeChange} options={ENCODING_TYPES} />
+    {encodingType === 'vbr'
+      ? <VbrDropdown onVbrSettingChange={onVbrSettingChange} vbrSetting={vbrSetting} />
+      : <BitrateSlider {...bitrate} />}
+  </div>
+);
 
 export default MP3EncodingTypeSelector;

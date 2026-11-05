@@ -1,32 +1,25 @@
-import React from "react";
 import BitrateSlider, { type BitrateSliderProps } from "./BitrateSlider";
+import SelectField from "./SelectField";
+import SettingNote from "./SettingNote";
 
 interface OpusProps {
-  onOpusEncodingTypeChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  onOpusEncodingTypeChange: (value: string) => void;
   encodingType: string;
   bitrate: BitrateSliderProps;
 }
 
-const Opus: React.FC<OpusProps> = ({
-  onOpusEncodingTypeChange,
-  encodingType,
-  bitrate,
-}) => {
-  return (
-    <div id="Opus">
-      <label htmlFor="opus_encoding_type">Encoding Type</label>
-      <select onChange={onOpusEncodingTypeChange} value={encodingType}>
-        <option disabled>Select Encoding Type</option>
-        <option value="vbr">VBR (with a target bitrate)</option>
-        <option value="cbr">CBR (Constant Bitrate)</option>
-      </select>
-      <BitrateSlider {...bitrate} />
-      <i>
-        Opus supports at most 256 kbps per channel. For mono audio, choose 256 kbps or less, or the
-        conversion will fail.
-      </i>
-    </div>
-  );
-};
+const ENCODING_TYPES = [["vbr", "VBR (with a target bitrate)"], ["cbr", "CBR (Constant Bitrate)"]] as const;
+
+const Opus = ({ onOpusEncodingTypeChange, encodingType, bitrate }: OpusProps) => (
+  <div id="Opus">
+    <SelectField id="opus_encoding_type" label="Encoding type" value={encodingType}
+      onChange={onOpusEncodingTypeChange} options={ENCODING_TYPES} />
+    <BitrateSlider {...bitrate} />
+    <SettingNote>
+      Opus supports at most 256 kbps per channel. For mono audio, choose 256 kbps or less, or the
+      conversion will fail.
+    </SettingNote>
+  </div>
+);
 
 export default Opus;

@@ -1,36 +1,15 @@
-import React from "react";
+import YesNoRadio from "./YesNoRadio";
 
 interface IsKeepVideoProps {
-  onIsKeepVideoChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  onIsKeepVideoChange: (value: boolean) => void;
   isKeepVideo: boolean;
 }
 
-const IsKeepVideo: React.FC<IsKeepVideoProps> = ({ onIsKeepVideoChange, isKeepVideo }) => {
-  return (
-    <div id="keep_video_div">
-      <br />
-      <label>
-        <input
-          className="mr-1"
-          type="radio"
-          onChange={onIsKeepVideoChange}
-          value="yes"
-          checked={isKeepVideo}
-        />
-        Keep the video (if applicable)
-      </label>
-      <label className="block">
-        <input
-          className="mr-1"
-          type="radio"
-          onChange={onIsKeepVideoChange}
-          value="no"
-          checked={!isKeepVideo}
-        />
-        I want an audio file
-      </label>
-    </div>
-  );
-};
+const IsKeepVideo = ({ onIsKeepVideoChange, isKeepVideo }: IsKeepVideoProps) => (
+  <div id="keep_video_div">
+    <YesNoRadio name="keep_video" label="Output" value={isKeepVideo} onChange={onIsKeepVideoChange}
+      yesLabel="Keep the video (if applicable)" noLabel="I want an audio file" />
+  </div>
+);
 
 export default IsKeepVideo;

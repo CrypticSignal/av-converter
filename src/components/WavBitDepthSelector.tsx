@@ -1,24 +1,17 @@
-import React from "react";
+import SelectField from "./SelectField";
 
 interface WavBitDepthSelectorProps {
-  onBitDepthChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  onBitDepthChange: (value: string) => void;
   bitDepth: string;
 }
 
-const WavBitDepthSelector: React.FC<WavBitDepthSelectorProps> = ({
-  onBitDepthChange,
-  bitDepth,
-}) => {
-  return (
-    <div id="wav_bit_depth_div">
-      <label htmlFor="wav_bit_depth">Output Bit Depth (audio):</label>
-      <select id="wav_bit_depth" onChange={onBitDepthChange} value={bitDepth}>
-        <option value="16">16</option>
-        <option value="24">24</option>
-        <option value="32">32</option>
-      </select>
-    </div>
-  );
-};
+const BIT_DEPTHS = ["16", "24", "32"].map(value => [value, `${value}-bit`] as const);
+
+const WavBitDepthSelector = ({ onBitDepthChange, bitDepth }: WavBitDepthSelectorProps) => (
+  <div id="wav_bit_depth_div">
+    <SelectField id="wav_bit_depth" label="Output bit depth (audio)" value={bitDepth}
+      onChange={onBitDepthChange} options={BIT_DEPTHS} />
+  </div>
+);
 
 export default WavBitDepthSelector;

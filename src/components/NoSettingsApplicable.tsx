@@ -1,11 +1,9 @@
-import React from "react";
+import SettingNote from "./SettingNote";
 
-const NoSettingsApplicable: React.FC = () => {
-  return (
-    <div id="no_settings_required">
-      <i>You chose a format that does not require you to specify any encoder settings.</i>
-    </div>
-  );
-};
+const NoSettingsApplicable = () => (
+  <div id="no_settings_required">
+    <SettingNote>You chose a format that does not require you to specify any encoder settings.</SettingNote>
+  </div>
+);
 
 export default NoSettingsApplicable;

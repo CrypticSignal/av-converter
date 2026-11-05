@@ -46,7 +46,7 @@ export type StringSetting = {
 
 interface PanelProps {
   settings: FormatSettings;
-  onChange: (key: StringSetting) => (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void;
+  onChange: (key: StringSetting) => (value: string) => void;
   /** Present exactly for formats with a bitrate range. */
   bitrate?: BitrateSliderProps;
 }

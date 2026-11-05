@@ -12,6 +12,7 @@ import { DEFAULT_SETTINGS, FORMATS, bitrateFor, type Codec, type FormatSettings,
 import FileInput from '../components/FileInput';
 import FormatSelector from '../components/FormatSelector';
 import IsKeepVideo from '../components/IsKeepVideo';
+import YesNoRadio from '../components/YesNoRadio';
 // Images
 import ffmpegLogo from '../images/ffmpeg-25.png';
 import webAssemblyLogo from '../images/webassembly-25.png';
@@ -19,6 +20,10 @@ import webAssemblyLogo from '../images/webassembly-25.png';
 import Alert, { AlertColor } from '@mui/material/Alert';
 import Typography from '@mui/material/Typography';
 import Divider from '@mui/material/Divider';
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import InputAdornment from '@mui/material/InputAdornment';
+import TextField from '@mui/material/TextField';
 
 /** The largest input the in-browser FFmpeg can reliably handle. */
 export const MAX_FILE_BYTES = 2 * 1024 ** 3;
@@ -95,18 +100,13 @@ const Homepage = (): React.JSX.Element => {
   const format = FORMATS[codec];
   const update = <K extends keyof FormatSettings>(key: K, value: FormatSettings[K]) =>
     setSettings(previous => ({ ...previous, [key]: value }));
-  const onSettingChange = (key: StringSetting) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => update(key, e.currentTarget.value);
-  // Radio pairs with "yes" and "no" values.
-  const onYesNoChange = (key: 'isKeepVideo' | 'downmixToStereo') =>
-    (e: React.ChangeEvent<HTMLInputElement>) => update(key, e.currentTarget.value === 'yes');
+  const onSettingChange = (key: StringSetting) => (value: string) => update(key, value);
   const bitrate = format.bitrate && {
     min: format.bitrate.min,
     max: format.bitrate.max,
     step: format.bitrate.step,
     value: bitrateFor(codec, settings),
-    onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
-      update('bitrates', { ...settings.bitrates, [codec]: e.currentTarget.value }),
+    onChange: (value: string) => update('bitrates', { ...settings.bitrates, [codec]: value }),
   };
 
   const onFile = (currentFile: File | undefined) => {
@@ -202,47 +202,45 @@ const Homepage = (): React.JSX.Element => {
       </Typography>
       <Divider sx={{ my: 2 }} />
 
-      <div className="my-4 text-center">
-        <label className="inline-flex items-center cursor-pointer">
-          <input
-            type="checkbox"
-            className="form-checkbox h-5 w-5 text-sky-600"
-            checked={manualMode}
-            onChange={(e) => setManualMode(e.target.checked)}
-          />
-          <span className="ml-2 text-black">Manual FFmpeg Command</span>
-        </label>
-      </div>
+      <FormControlLabel
+        control={<Checkbox checked={manualMode} onChange={(_, checked) => setManualMode(checked)} />}
+        label="Manual FFmpeg Command"
+      />
 
       <Divider sx={{ my: 2 }} />
 
       {manualMode ? (
-        <div className="my-4 w-full max-w-xl mx-auto">
+        <div className="my-4 w-full max-w-xl mx-auto px-4">
           <Typography variant="h5" component="h2" gutterBottom>
             Enter FFmpeg Command
           </Typography>
-          <Typography variant="body2" color="text.secondary" gutterBottom>
-            Enter the rest of the command (e.g. <code>-c:v libx264 output.mp4</code>).
-          </Typography>
-          <div className="flex items-stretch mt-1">
-            <span
-              className="bg-gray-200 border border-gray-300 border-r-0 rounded-l-md px-3 py-2 text-sm text-gray-700 whitespace-nowrap overflow-hidden text-ellipsis shrink-0 max-w-[150px] sm:max-w-[250px]"
-              title={`ffmpeg -i "${inputFilename || 'input.mp4'}"`}
-            >
-              ffmpeg -i {inputFilename || 'input.mp4'}
-            </span>
-            <input
-              type="text"
-              className="flex-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-r-md text-sm shadow-sm placeholder-gray-400 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 text-black min-w-[100px]"
-              value={manualCommandInput}
-              onChange={(e) => setManualCommandInput(e.target.value)}
-              placeholder="-c:v libx264 output.mp4"
-            />
-          </div>
+          <TextField
+            id="manual_command"
+            label="Rest of the command"
+            value={manualCommandInput}
+            onChange={e => setManualCommandInput(e.target.value)}
+            placeholder="-c:v libx264 output.mp4"
+            helperText={<>Enter everything after the input, ending with the output filename (e.g. <code>-c:v libx264 output.mp4</code>).</>}
+            fullWidth
+            autoComplete="off"
+            slotProps={{
+              inputLabel: { shrink: true },
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start" title={`ffmpeg -i ${inputFilename || 'input.mp4'}`}
+                    sx={{ maxWidth: '50%', flexShrink: 0, overflow: 'hidden' }}>
+                    <span className="block whitespace-nowrap overflow-hidden text-ellipsis">
+                      ffmpeg -i {inputFilename || 'input.mp4'}
+                    </span>
+                  </InputAdornment>
+                ),
+              },
+            }}
+          />
         </div>
       ) : (
         <>
-          <FormatSelector onCodecChange={e => setCodec(e.currentTarget.value as Codec)} codec={codec} />
+          <FormatSelector onCodecChange={setCodec} codec={codec} />
           <Divider sx={{ my: 2 }} />
 
           <Typography variant="h5" component="h2" gutterBottom>
@@ -251,51 +249,27 @@ const Homepage = (): React.JSX.Element => {
 
           <format.Panel settings={settings} onChange={onSettingChange} bitrate={bitrate} />
           {format.keepVideo && (
-            <IsKeepVideo onIsKeepVideoChange={onYesNoChange('isKeepVideo')} isKeepVideo={settings.isKeepVideo} />
+            <IsKeepVideo onIsKeepVideoChange={value => update('isKeepVideo', value)} isKeepVideo={settings.isKeepVideo} />
           )}
-          
+
           {!format.copiesAudio && (
-            <div className="my-4">
-              <Typography variant="subtitle1" component="h3" gutterBottom>
-                Downmix to stereo?
-              </Typography>
-              <label className="mr-4">
-                <input
-                  type="radio"
-                  name="downmix"
-                  value="yes"
-                  checked={settings.downmixToStereo}
-                  onChange={onYesNoChange('downmixToStereo')}
-                  className="mr-1"
-                />
-                Yes
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="downmix"
-                  value="no"
-                  checked={!settings.downmixToStereo}
-                  onChange={onYesNoChange('downmixToStereo')}
-                  className="mr-1"
-                />
-                No
-              </label>
+            <div>
+              <YesNoRadio name="downmix" label="Downmix to stereo?" value={settings.downmixToStereo}
+                onChange={value => update('downmixToStereo', value)} />
             </div>
           )}
           <Divider sx={{ my: 2 }} />
 
-          <Typography variant="h5" component="h2" gutterBottom>
-            Output Filename
-          </Typography>
-          <input
-            type="text"
-            autoComplete="off"
-            className="mt-1 block w-full max-w-xs mx-auto px-3 py-2 bg-white border border-gray-300 rounded-md text-sm shadow-sm placeholder-gray-400 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 disabled:shadow-none invalid:border-pink-500 invalid:text-pink-600 focus:invalid:border-pink-500 focus:invalid:ring-pink-500 text-black"
-            maxLength={200}
+          <TextField
             id="output_name"
+            label="Output filename"
             value={outputName}
             onChange={e => setOutputName(e.target.value)}
+            autoComplete="off"
+            size="small"
+            fullWidth
+            sx={{ maxWidth: 320, my: 1.5 }}
+            slotProps={{ htmlInput: { maxLength: 200 }, inputLabel: { shrink: true } }}
           />
         </>
       )}
