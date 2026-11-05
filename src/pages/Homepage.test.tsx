@@ -370,3 +370,28 @@ it('leaves stream mapping to the user in manual command mode', async () => {
   expect(job().ffmpegArgs).toEqual(['-i', 'input.mkv', '-map', '0:1', '-c:a', 'copy', 'out.mka']);
   view.unmount();
 });
+
+it.each(['cancel', 'complete'])('locks settings and file drops while converting and unlocks on %s', async ending => {
+  let finish!: () => void;
+  vi.mocked(convertFile).mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+  const view = render(<Homepage />);
+  selectFile(view, 'original.wav');
+  fireEvent.click(view.getByRole('button', { name: /^convert/i }));
+  const settings = view.getByRole('group', { name: 'Conversion settings' }) as HTMLFieldSetElement;
+  expect(settings.disabled).toBe(true);
+  const controls = settings.querySelectorAll('input, select, textarea, button');
+  expect(controls.length).toBeGreaterThan(4);
+  for (const control of controls) expect(control.matches(':disabled')).toBe(true);
+  expect(view.getByRole('button', { name: 'Cancel' }).matches(':disabled')).toBe(false);
+  fireEvent.drop(view.getByTestId('file-drop-zone'), { dataTransfer: { files: [new File(['new'], 'replacement.wav')] } });
+  expect(job().file.name).toBe('original.wav');
+  expect(view.queryByText('replacement.wav')).toBeNull();
+  if (ending === 'cancel') fireEvent.click(view.getByRole('button', { name: 'Cancel' }));
+  await act(async () => finish());
+  expect(settings.disabled).toBe(false);
+  fireEvent.change(view.getByLabelText('Output filename'), { target: { value: 'renamed' } });
+  expect((view.getByLabelText('Output filename') as HTMLInputElement).value).toBe('renamed');
+  selectFile(view, 'next.wav');
+  expect(view.getByText('next.wav')).toBeTruthy();
+  view.unmount();
+});
