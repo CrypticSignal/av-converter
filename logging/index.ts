@@ -7,7 +7,9 @@ const LOKI_URL = 'http://loki:3100/loki/api/v1/push';
 
 app.use(cors());
 app.use(express.json());
-app.set('trust proxy', true);
+// nginx is the only hop in front of this service. Trusting just that hop makes req.ip
+// the address nginx saw, not the leftmost X-Forwarded-For entry, which visitors can forge.
+app.set('trust proxy', 1);
 
 app.post('/logging/visit', async (req: Request, res: Response) => {
     try {
@@ -19,7 +21,7 @@ app.post('/logging/visit', async (req: Request, res: Response) => {
 
         const logEntry = {
             "Path": path,
-            "IP": req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+            "IP": req.ip || req.socket.remoteAddress,
             "Device Model": req.body.deviceModel,
             "Device Platform": req.body.devicePlatform,
             "User Agent": req.headers['user-agent'] || 'Unknown'
