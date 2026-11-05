@@ -21,7 +21,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "deploy-all": "yarn build && docker compose -f docker/prod/docker-compose.yml up -d --build --remove-orphans && docker compose -f docker/prod/docker-compose.yml exec --no-tty nginx nginx -s reload",
+    "deploy-all": "yarn build && docker compose -f docker/prod/docker-compose.yml build --pull && docker compose -f docker/prod/docker-compose.yml up -d --remove-orphans && docker compose -f docker/prod/docker-compose.yml exec --no-tty nginx nginx -s reload",
     "deploy-src": "yarn build",
     "docker-down": "docker compose -f docker/prod/docker-compose.yml down",
     "docker-logs": "docker compose -f docker/prod/docker-compose.yml logs -f",
