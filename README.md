@@ -18,6 +18,7 @@
 - [Run locally](#run-locally)
   - [With Docker](#with-docker)
   - [Without Docker](#without-docker)
+- [Automatic production deployment](#automatic-production-deployment)
 - [YouTube cookies](#youtube-cookies)
 - [Downloader limits](#downloader-limits)
 - [Tests](#tests)
@@ -117,3 +118,81 @@ GitHub Actions runs both suites and the production build on every push to master
 | `@ffmpeg/core-mt`, `@ffmpeg/core` | The multi-threaded and single-threaded FFmpeg WebAssembly cores, which Vite bundles as content-hashed assets. Pages that aren't cross-origin isolated (no SharedArrayBuffer) fall back to the single-threaded core. |
 
 To add an output format, add its name to `Codec` and an entry to `FORMATS` in `src/formats.tsx`, then add a row to the table in `src/utils/createFFmpegArgs.test.ts`.
+
+## Automatic production deployment
+
+The `deploy` job in `.github/workflows/ci.yml` can deploy automatically over SSH
+when a commit reaches `master` and both CI test jobs pass. Pull requests never
+run this job. Deployment is disabled until the repository variable
+`DEPLOY_ENABLED` is set to `true`.
+
+### Server setup
+
+1. Set up production using the existing Docker configuration first, including
+   `cookies.txt`, certificates, and an initial working deployment.
+2. Keep a dedicated clone of this repository on the server, with `origin`
+   pointing at this GitHub repository. The deployment user must own the checkout,
+   be able to fetch from `origin` without prompts, and have permission to run
+   Docker Compose. Do not use this checkout for editing source files.
+3. Ensure Bash, Git, `flock` (util-linux), Node.js 26+, Yarn, and Docker Compose
+   are on this user's **noninteractive SSH PATH**. Tools installed only through
+   interactive shell profiles, such as some nvm setups, need explicit PATH setup.
+4. Create a dedicated SSH key for deployments. Add its public key to the user's
+   `~/.ssh/authorized_keys`; store the private key in GitHub, not in the repo.
+   The server's SSH port must be reachable from GitHub-hosted runners.
+
+### GitHub setup
+
+In **Settings → Secrets and variables → Actions**, add these repository secrets:
+
+| Secret | Value |
+| --- | --- |
+| `DEPLOY_HOST` | Server hostname or IP address |
+| `DEPLOY_USER` | SSH deployment username |
+| `DEPLOY_SSH_KEY` | Dedicated private key, including its header/footer; no passphrase |
+| `DEPLOY_KNOWN_HOSTS` | Verified OpenSSH known_hosts entry for the server |
+
+Obtain the server's SSH host public key through a trusted connection and verify
+its fingerprint. For a nonstandard port, the known_hosts entry uses
+`[hostname]:port`. The workflow checks this pinned key instead of trusting a new
+key fetched during deployment.
+
+Add these repository **variables**:
+
+| Variable | Value |
+| --- | --- |
+| `DEPLOY_PATH` | Absolute repository path, e.g. `/srv/av-converter` (letters, digits, `_`, `.`, `-`, and `/` only) |
+| `DEPLOY_PORT` | SSH port; optional, defaults to `22` |
+| `DEPLOY_ENABLED` | Set to `true` after setup to enable deployment; `false` disables it |
+
+The job uses the GitHub `production` environment. You may configure environment
+protection rules; required reviewers make deployment wait for approval. For fully
+automatic deployment, do not require manual approval. Changes to the enable flag
+apply on the next push to `master`; enabling it alone does not trigger a run.
+
+### Deployment behavior
+
+The server runs `scripts/deploy.sh` with the full commit SHA that passed CI. It
+fetches `master`, skips superseded commits, refuses to overwrite tracked local
+edits, checks out the tested commit in detached HEAD mode, then runs:
+
+```sh
+yarn install --frozen-lockfile
+yarn deploy-all
+```
+
+GitHub serializes deployments without cancelling an active deployment. A server
+lock also prevents concurrent invocations of the deployment script. Ignored
+cookies and other production files remain in place. Follow deployments in the
+**Actions → CI → deploy** job logs.
+
+A failed command fails the job; there is no automatic rollback. Container
+recreation can interrupt active downloads, just as a manual `yarn deploy-all`
+would. To retry after correcting a server problem, rerun the failed deployment
+job in Actions. An older commit is skipped if `master` has since advanced.
+
+Run deployment-script tests locally without SSH, containers, or internet access:
+
+```sh
+python -m unittest discover -s scripts -p 'test_*.py'
+```

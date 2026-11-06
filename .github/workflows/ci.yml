@@ -33,3 +33,55 @@ jobs:
           cache-dependency-path: downloader/requirements.txt
       - run: python -m pip install -r downloader/requirements.txt
       - run: python -m unittest discover -s downloader -p "test_*.py"
+      - run: python -m unittest discover -s scripts -p "test_*.py"
+
+  deploy:
+    # PRs never receive deployment credentials. Enable only after server setup.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.DEPLOY_ENABLED == 'true'
+    needs: [frontend, downloader]
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    # Let an active deployment finish; newer pending commits can replace older ones.
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Deploy tested commit over SSH
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?Missing DEPLOY_HOST secret}"
+          : "${DEPLOY_USER:?Missing DEPLOY_USER secret}"
+          : "${DEPLOY_SSH_KEY:?Missing DEPLOY_SSH_KEY secret}"
+          : "${DEPLOY_KNOWN_HOSTS:?Missing DEPLOY_KNOWN_HOSTS secret}"
+          # These two values enter the remote shell command: accept only a full
+          # SHA and a simple absolute path, keeping configuration out of shell code.
+          [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_./-]+$ ]]
+          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
+          ssh_dir=$(mktemp -d)
+          trap 'rm -rf "$ssh_dir"' EXIT
+          chmod 700 "$ssh_dir"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 600 "$ssh_dir/key" "$ssh_dir/known_hosts"
+          # Pin the server key supplied during setup; never trust a key fetched
+          # from the network during a deployment or disable host-key verification.
+          ssh -T -i "$ssh_dir/key" -p "$DEPLOY_PORT" -l "$DEPLOY_USER" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" -o ConnectTimeout=20 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=6 \
+            -- "$DEPLOY_HOST" "bash -s -- '$DEPLOY_SHA' '$DEPLOY_PATH'" < scripts/deploy.sh
