@@ -8,6 +8,7 @@ import multiThreadWasmURL from '@ffmpeg/core-mt/wasm?url';
 import multiThreadWorkerURL from '@ffmpeg/core-mt/worker?url';
 import type { AlertColor } from '@mui/material';
 import { nonnegative, OperationProgress } from './progress';
+import { downloadFile } from './downloadFile';
 
 const loads = new WeakMap<FFmpeg, Promise<void>>();
 const INPUT_DIR = '/input';
@@ -165,10 +166,7 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
     const blob = new Blob([blobPart]);
     const objectURL = URL.createObjectURL(blob);
     try {
-      const anchor = document.createElement('a');
-      anchor.href = objectURL;
-      anchor.download = outputFilename;
-      anchor.click();
+      downloadFile(objectURL, outputFilename);
     } finally {
       if (onOutput) onOutput({ url: objectURL, filename: outputFilename, size: blob.size });
       else setTimeout(() => URL.revokeObjectURL(objectURL), 100);

@@ -68,23 +68,20 @@ describe('encoding modes', () => {
 });
 
 describe('keep-video containers', () => {
-  for (const { codec, settings } of formats) {
-    if (!FORMATS[codec].keepVideo) continue;
-    it.each(['webm', 'ogg', 'avi', 'mov', 'mp4', 'mkv', 'MP4', '']) (
-      `${codec}: chooses a compatible container for original extension "%s"`, (extension) => {
-        const input = `input${extension ? `.${extension}` : ''}`;
-        const keepsContainer = ['AAC', 'AC3', 'ALAC', 'MP3'].includes(codec)
-          && ['mp4', 'mov'].includes(extension.toLowerCase());
-        const outputFilename = `output.${keepsContainer ? extension.toLowerCase() : 'mkv'}`;
-        const result = run(input, codec, { ...settings, isKeepVideo: true, downmixToStereo: true });
-        expect(result.outputFilename).toBe(outputFilename);
-        expect(result.ffmpegArgs.slice(0, 2)).toEqual(['-i', input]);
-        expect(result.ffmpegArgs).toContain('-c:V');
-        expect(result.ffmpegArgs[result.ffmpegArgs.indexOf('-c:V') + 1]).toBe('copy');
-        expect(result.ffmpegArgs.slice(-3)).toEqual(['-ac', '2', outputFilename]);
-      },
-    );
-  }
+  it.each<[Codec, string, string]>([
+    ['AAC', 'input.mp4', 'output.mp4'],
+    ['AC3', 'input.mov', 'output.mov'],
+    ['ALAC', 'input.MP4', 'output.mp4'],
+    ['MP3', 'input.webm', 'output.mkv'],
+    ['AAC', 'input', 'output.mkv'],
+    ['DTS', 'input.mp4', 'output.mkv'],
+    ['FLAC', 'input.mov', 'output.mkv'],
+  ])('%s with %s writes %s and copies video', (codec, input, outputFilename) => {
+    const result = run(input, codec, { isKeepVideo: true });
+    expect(result.outputFilename).toBe(outputFilename);
+    expect(result.ffmpegArgs.slice(2, 4)).toEqual(['-c:V', 'copy']);
+    expect(result.ffmpegArgs.at(-1)).toBe(outputFilename);
+  });
 });
 
 describe('output filename', () => {

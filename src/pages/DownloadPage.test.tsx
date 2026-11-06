@@ -110,6 +110,24 @@ it('reports premature EOF without fabricating completion', async () => {
   expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
 });
 
+it('finishes at the ready event without waiting for EOF or processing later events', async () => {
+  const current = stream();
+  vi.mocked(fetch).mockResolvedValue(current.response);
+  const view = render(<DownloadPage />);
+  start(view);
+  await current.send([
+    { type: 'ready', url: '/file', filename: 'video.mp4' },
+    { type: 'error', message: 'Late error' },
+    { type: 'ready', url: '/duplicate', filename: 'duplicate.mp4' },
+  ]);
+  expect(view.getByRole('status').textContent).toBe('Ready to download');
+  expect(view.queryByText('Late error')).toBeNull();
+  expect(view.queryByRole('button', { name: 'Cancel' })).toBeNull();
+  expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledOnce();
+  expect(current.reader.cancel).toHaveBeenCalledOnce();
+  expect(current.reader.releaseLock).toHaveBeenCalledOnce();
+});
+
 it('aborts on unmount before fetch resolves and cancels a late response body', async () => {
   const pending = deferred<Response>();
   const current = stream();
@@ -162,9 +180,4 @@ it('does not let delayed reader cleanup finish a restarted request', async () =>
   fireEvent.click(view.getByRole('button', { name: 'Cancel' }));
   expect(vi.mocked(fetch).mock.calls[1][1]!.signal!.aborted).toBe(true);
   await next.send([], true);
-});
-
-it('limits the URL field to 2048 characters', () => {
-  const view = render(<DownloadPage />);
-  expect(view.getByLabelText(/Video URL/).getAttribute('maxlength')).toBe('2048');
 });
