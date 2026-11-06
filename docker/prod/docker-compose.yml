@@ -9,7 +9,6 @@ services:
       # Bound expensive jobs across all visitors; the per-IP limit still applies.
       DOWNLOAD_MAX_CONCURRENT: "4"
       DOWNLOAD_STORAGE_DIR: /tmp/av-downloader
-      DOWNLOAD_STORAGE_QUOTA_BYTES: "10737418240"
       DOWNLOAD_MIN_FREE_BYTES: "1073741824"
       DOWNLOAD_STORAGE_CHECK_SECONDS: "1"
     volumes:
