@@ -56,24 +56,17 @@ yarn install
 yarn dev
 ```
 
-Open http://localhost:3000. Vite proxies download requests to http://127.0.0.1:8000; set `DOWNLOADER_URL` to use another backend. Downloads need the Vite development server or production Nginx, not the static preview server.
+Open http://localhost:3000. Vite proxies download requests to http://127.0.0.1:8000; set `DOWNLOADER_URL` to use another backend. Local downloads need the Vite development server, not the static preview server.
 
 ## YouTube cookies
 
 For private, access-controlled deployments, a Netscape-format cookie export can help with YouTube sign-in challenges. **Cookies are login credentials:** never commit them, expose them to visitors, or use a personal session on a public downloader. Sessions can expire or fail to authenticate.
 
-Production Docker requires `cookies.txt` in the project root. Create it before starting the service and make it readable by the container's `downloader` user, using restrictive permissions. It is mounted read-only, not included in the image. After adding or replacing it, run:
-
-```sh
-docker compose -f docker/prod/docker-compose.yml up -d --build downloader
-docker compose -f docker/prod/docker-compose.yml exec -T nginx nginx -s reload
-```
-
 Without Docker, use `downloader/cookies.txt`. Each request gets a temporary copy so the original stays unchanged. Development Docker and non-Docker setups work anonymously when no cookie file is supplied.
 
 ## Downloader limits
 
-Each IP address can run five downloads at once, with a configurable server-wide cap of four active jobs by default. Jobs include metadata lookup, media download, and postprocessing; completed file transfers do not occupy a job slot. Behind Nginx, the backend reads the visitor's address from `X-Real-IP`, which it accepts only from private or loopback addresses. Live recordings have no duration limit, but storage limits still apply.
+Each IP address can run five downloads at once, with a configurable server-wide cap of four active jobs by default. Jobs include metadata lookup, media download, and postprocessing; completed file transfers do not occupy a job slot. Live recordings have no duration limit, but storage limits still apply.
 
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
@@ -86,8 +79,6 @@ Each IP address can run five downloads at once, with a configurable server-wide 
 Storage checks include partial files, completed files awaiting collection (up to ten minutes), and active transfers. Exceeding a limit stops the affected job and removes its files; retained downloads aren't evicted to make room. Requests over the per-IP limit return HTTP 429; a full server returns HTTP 503 with `Retry-After: 5`; requests rejected for storage limits return HTTP 507.
 
 Checks are periodic, so usage can briefly exceed the limit. Use a filesystem or container storage quota for a strict ceiling, and run only one backend process per storage root.
-
-Production Docker limits the downloader to two CPUs and 2 GiB of memory, and keeps its port private.
 
 ## Tests
 
@@ -103,7 +94,7 @@ Run frontend tests:
 yarn test
 ```
 
-GitHub Actions runs both suites and the production build on every push to master and on pull requests.
+GitHub Actions runs both suites and the frontend build on every push to master and on pull requests.
 
 ## Code layout
 
