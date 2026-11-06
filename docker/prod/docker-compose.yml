@@ -30,6 +30,7 @@ services:
       - certbot_webroot_path:/var/www/certbot:ro
       - ssl_certificate:/etc/letsencrypt:ro
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./locations.conf:/etc/nginx/locations.conf:ro
       - ../../build:/usr/share/nginx/html:ro
       - ../../public/game:/game:ro
     depends_on:

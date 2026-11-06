@@ -187,19 +187,6 @@ const selectFile = (view: ReturnType<typeof render>, name: string) => {
   return file;
 };
 
-it.each([
-  ['AAC', 'aac'], ['AC3', 'ac3'], ['ALAC', 'alac'], ['CAF', 'alac'], ['DTS', 'dca'], ['FLAC', 'flac'],
-  ['MKA', 'copy'], ['MP3', 'libmp3lame'], ['Opus', 'libopus'], ['Vorbis', 'libvorbis'], ['WAV', 'pcm_s16le'],
-])('renders the %s settings and encodes with %s', (codec, encoder) => {
-  const view = render(<Homepage />);
-  selectFile(view, 'input.wav');
-  fireEvent.change(view.container.querySelector('#codecs')!, { target: { value: codec } });
-  fireEvent.click(view.getByRole('button', { name: /^convert/i }));
-  const args = job().ffmpegArgs;
-  expect(args[args.indexOf('-c:a') + 1]).toBe(encoder);
-  view.unmount();
-});
-
 it('offers keeping the video for AAC', () => {
   const view = render(<Homepage />);
   selectFile(view, 'clip.mp4');

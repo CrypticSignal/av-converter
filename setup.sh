@@ -134,53 +134,7 @@ http {
         listen 80;
         server_name localhost;
 
-        # Send downloader requests to its private container, preserving the API path.
-        location /api/ {
-            # Match the backend form-body limit; preserve visitor IP for per-IP limits.
-            client_max_body_size 8k;
-            proxy_pass http://downloader:8000;
-            proxy_set_header X-Real-IP $remote_addr;
-            # Allow long downloads/recordings and stream progress without proxy buffering.
-            proxy_read_timeout 24h;
-            proxy_buffering off;
-        }
-
-        # Limit tiny visit reports; replace client-supplied forwarding headers to prevent spoofing.
-        location /logging {
-            limit_req zone=visit_logging burst=10 nodelay;
-            limit_req_status 429;
-            client_max_body_size 2k;
-            proxy_pass http://logging:3000;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $remote_addr;
-        }
-
-        # Proxy monitoring, including HTTP/1.1 WebSocket upgrades for live features.
-        location /grafana/ {
-            proxy_pass http://grafana:3000;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        }
-
-        location /game {
-            root /;
-            try_files $uri /game/game.html;
-        }
-
-        location / {
-            add_header 'Cross-Origin-Embedder-Policy' 'require-corp';
-            add_header 'Cross-Origin-Opener-Policy' 'same-origin';
-            root /usr/share/nginx/html;
-            try_files $uri /index.html =404;
-
-            # Disable caching
-            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
-            expires off;
-        }
+        include /etc/nginx/locations.conf;
     }
 }
 EOL
@@ -282,53 +236,7 @@ http {
             root /var/www/certbot;
         }
 
-        # Send downloader requests to its private container, preserving the API path.
-        location /api/ {
-            # Match the backend form-body limit; preserve visitor IP for per-IP limits.
-            client_max_body_size 8k;
-            proxy_pass http://downloader:8000;
-            proxy_set_header X-Real-IP $remote_addr;
-            # Allow long downloads/recordings and stream progress without proxy buffering.
-            proxy_read_timeout 24h;
-            proxy_buffering off;
-        }
-
-        # Limit tiny visit reports; replace client-supplied forwarding headers to prevent spoofing.
-        location /logging {
-            limit_req zone=visit_logging burst=10 nodelay;
-            limit_req_status 429;
-            client_max_body_size 2k;
-            proxy_pass http://logging:3000;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $remote_addr;
-        }
-
-        # Proxy monitoring, including HTTP/1.1 WebSocket upgrades for live features.
-        location /grafana/ {
-            proxy_pass http://grafana:3000;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        }
-
-        location /game {
-            root /;
-            try_files $uri /game/game.html;
-        }
-
-        location / {
-            add_header 'Cross-Origin-Embedder-Policy' 'require-corp';
-            add_header 'Cross-Origin-Opener-Policy' 'same-origin';
-            root /usr/share/nginx/html;
-            try_files $uri /index.html =404;
-
-            # Disable caching
-            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
-            expires off;
-        }
+        include /etc/nginx/locations.conf;
     }
 }
 EOL

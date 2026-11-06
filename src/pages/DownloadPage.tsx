@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Alert, Box, Button, Container, MenuItem, TextField } from '@mui/material';
 import OperationStatus from '../components/OperationStatus';
 import { downloadProgress, OperationProgress } from '../utils/progress';
+import { downloadFile } from '../utils/downloadFile';
 
 type DownloadEvent =
   | { type: 'stage'; stage: string }
@@ -81,49 +82,36 @@ export default function DownloadPage() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      let finished = false;
-      function handleLine(line: string) {
-        if (!active() || finished) return;
-        if (!line.trim()) return;
-        const message: DownloadEvent = JSON.parse(line);
-        if (message.type === 'stage') {
-          setStatus({ stage: message.stage === 'metadata' ? 'Loading metadata'
-            : message.stage === 'download' ? 'Downloading' : 'Postprocessing' });
-        } else if (message.type === 'progress') {
-          setStatus(downloadProgress(message));
-        } else if (message.type === 'log') {
-          // Keep the latest output, rather than growing memory for hours-long recordings.
-          setOutput(previous => (previous + message.message + '\n').slice(-100_000));
-        } else if (message.type === 'error') {
-          throw new Error(message.message);
-        } else if (message.type === 'ready' && !finished) {
-          setResult({ url: message.url, filename: message.filename });
-          finished = true;
-          setStatus({ stage: 'Ready to download' });
-          // Let the browser download directly, without fetching the file into page memory.
-          const link = document.createElement('a');
-          link.href = message.url;
-          link.download = message.filename;
-          document.body.appendChild(link);
-          try {
-            link.click();
-          } finally {
-            link.remove();
-          }
-        }
-      }
       try {
-        while (true) {
+        while (active()) {
           const { value, done } = await reader.read();
-          if (!active()) break;
+          if (!active()) return;
           buffer += decoder.decode(value, { stream: !done });
           const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          lines.forEach(handleLine);
-          if (done) break;
+          buffer = lines.pop()!;
+          if (done) lines.push(buffer);
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const message: DownloadEvent = JSON.parse(line);
+            if (message.type === 'stage') {
+              setStatus({ stage: message.stage === 'metadata' ? 'Loading metadata'
+                : message.stage === 'download' ? 'Downloading' : 'Postprocessing' });
+            } else if (message.type === 'progress') {
+              setStatus(downloadProgress(message));
+            } else if (message.type === 'log') {
+              // Keep the latest output, rather than growing memory for hours-long recordings.
+              setOutput(previous => (previous + message.message + '\n').slice(-100_000));
+            } else if (message.type === 'error') {
+              throw new Error(message.message);
+            } else if (message.type === 'ready') {
+              setResult({ url: message.url, filename: message.filename });
+              setStatus({ stage: 'Ready to download' });
+              downloadFile(message.url, message.filename);
+              return;
+            }
+          }
+          if (done) throw new Error('The connection ended before the video was ready. Please try again.');
         }
-        handleLine(buffer);
-        if (!finished) throw new Error('The connection ended before the video was ready. Please try again.');
       } finally {
         await reader.cancel().catch(() => undefined);
         reader.releaseLock();

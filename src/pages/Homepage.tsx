@@ -90,15 +90,11 @@ const Homepage = (): React.JSX.Element => {
   // What ffprobe found in the selected file; a token ignores results for an older file.
   const [mediaInfo, setMediaInfo] = useState<MediaInfoState | null>(null);
   const probeToken = useRef<object | null>(null);
-  // The last converted file, kept so it can be downloaded again. Its URL is revoked
-  // when it is replaced and when the page unmounts.
-  const [output, setOutputState] = useState<ConvertedFile | null>(null);
-  const outputURL = useRef<string | null>(null);
-  const setOutput = (next: ConvertedFile | null) => {
-    if (outputURL.current) URL.revokeObjectURL(outputURL.current);
-    outputURL.current = next?.url ?? null;
-    setOutputState(next);
-  };
+  // Keep the last converted file available for another download.
+  const [output, setOutput] = useState<ConvertedFile | null>(null);
+  useEffect(() => () => {
+    if (output) URL.revokeObjectURL(output.url);
+  }, [output]);
   // The FFmpeg worker, and a token for the running conversion. Callbacks from a
   // conversion are ignored once either is replaced (on cancel or unmount).
   const ffmpegRef = useRef<FFmpeg | null>(null);
@@ -113,11 +109,7 @@ const Homepage = (): React.JSX.Element => {
 
   useEffect(() => {
     ffmpegRef.current = new FFmpeg();
-    return () => {
-      stopWorker();
-      if (outputURL.current) URL.revokeObjectURL(outputURL.current);
-      outputURL.current = null;
-    };
+    return stopWorker;
   }, []);
 
   useEffect(() => saveSettings({ codec, settings }), [codec, settings]);

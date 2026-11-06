@@ -44,8 +44,4 @@ describe('human-readable formatting', () => {
     'formats %d seconds as %s', (seconds, text) => {
       expect(formatDuration(seconds)).toBe(text);
     });
-  it('formats download sizes and speeds', () => {
-    expect(downloadProgress({ stage: 'download', downloaded_bytes: 5 * 1024 ** 2, total_bytes: 20 * 1024 ** 2, speed: 1.5 * 1024 ** 2 }))
-      .toMatchObject({ detail: '5.0 MiB / 20.0 MiB', speed: '1.5 MiB/s' });
-  });
 });

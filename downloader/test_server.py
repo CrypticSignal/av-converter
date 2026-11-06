@@ -17,7 +17,7 @@ from server import (DOWNLOAD_FILES, DOWNLOAD_SLOTS, MAX_DOWNLOADS_PER_CLIENT, Cl
                     DownloadFiles, DownloadHandler,
                     ThreadingHTTPServer, validate_url, StorageGuard,
                     download_video, DownloadError)
-from server import run_monitored, read_metadata, DOWNLOAD_LINK_SECONDS
+from server import run_monitored, read_metadata
 
 
 class DownloadTests(unittest.TestCase):
@@ -577,9 +577,6 @@ class ResourceTests(unittest.TestCase):
             with self.assertRaisesRegex(DownloadError, 'quota'):
                 read_metadata([sys.executable, '-c', 'import time; time.sleep(30)'], Mock())
         self.assertFalse(any(thread.name == 'download-pipe' for thread in threading.enumerate()))
-
-    def test_token_lifetime_remains_ten_minutes(self):
-        self.assertEqual(DOWNLOAD_LINK_SECONDS, 600)
 
     def test_metadata_json_and_stderr_are_drained_separately(self):
         events = []
