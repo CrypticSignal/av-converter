@@ -7,6 +7,14 @@ EMAIL="theaudiophile@outlook.com"
 
 # Package installation, firewall changes and cron files require root privileges.
 [[ $EUID -eq 0 ]] || { echo "Run with sudo bash setup.sh" >&2; exit 1; }
+# Detect the account invoking sudo; Ubuntu VPS images default to ubuntu.
+SETUP_USER="${SUDO_USER:-ubuntu}"
+if [[ "$SETUP_USER" == root ]] || ! id "$SETUP_USER" >/dev/null 2>&1; then
+  echo "Run setup via sudo from the account that will deploy the app." >&2
+  exit 1
+fi
+SETUP_GROUP="$(id -gn "$SETUP_USER")"
+
 # Resolve project-relative paths from this script, regardless of the caller's directory.
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
@@ -63,26 +71,16 @@ chmod 644 /etc/cron.d/av-converter-firewall
 systemctl enable --now cron
 log "Also allow TCP 80/443 in Oracle Cloud, and point your domain at this VPS."
 
-log "Checking if Docker is running..."
-if docker info > /dev/null 2>&1; then
-  log "Docker is already running."
-else
-  log "Enabling and starting Docker service..."
-  if command -v systemctl &> /dev/null && systemctl list-unit-files | grep -q docker.service; then
-    systemctl enable --now docker
-  elif command -v service &> /dev/null && service docker status >/dev/null 2>&1; then
-    log "systemctl not found or docker.service missing, trying service command..."
-    service docker start
-  elif command -v snap &> /dev/null && snap list docker &> /dev/null; then
-    log "Docker installed via snap, starting snap.docker.dockerd..."
-    systemctl enable --now snap.docker.dockerd.service || snap start docker
-  else
-    log "Could not automatically start docker service. Starting dockerd in background as a fallback..."
-    dockerd > /dev/null 2>&1 &
-    sleep 3
-  fi
-fi
+# This Ubuntu setup already uses systemd for cron; use it for Docker too.
+log "Enabling and starting Docker service..."
+systemctl enable --now docker
 
+# Grant Docker access and verify it using the user's updated group membership.
+# newgrp opens a new shell; runuser applies the new groups to commands here
+# without interrupting setup or starting an interactive shell as root.
+log "Granting Docker access to $SETUP_USER..."
+usermod -aG docker "$SETUP_USER"
+runuser -u "$SETUP_USER" -- docker info >/dev/null
 
 # ------------------------------------------------------------------------------------------------------------------------------
 
@@ -93,12 +91,19 @@ apt-get install -y nodejs
 log "Installing yarn..."
 npm install --global yarn
 
+# Repair generated files from previous root-run installs. Leave source and cookies alone.
+log "Preparing writable dependencies and build output for $SETUP_USER..."
+mkdir -p node_modules build
+chown -R "$SETUP_USER:$SETUP_GROUP" node_modules build
+chmod -R u+rwX node_modules build
+
 log "Installing dependencies..."
+# Build as the deployment account to avoid creating root-owned files again.
 # Use the committed dependency versions and fail instead of rewriting yarn.lock.
-yarn install --frozen-lockfile
+runuser -u "$SETUP_USER" -- yarn install --frozen-lockfile --non-interactive
 
 log "Building the project..."
-yarn build
+runuser -u "$SETUP_USER" -- yarn build
 
 # Production requires this bind-mounted file, even for anonymous downloads.
 if [ ! -e cookies.txt ]; then
@@ -346,3 +351,4 @@ EOL
 fi
 
 log "Setup complete."
+log "Reconnect SSH (or run 'newgrp docker') before running Docker as $SETUP_USER."
