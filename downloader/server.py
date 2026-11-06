@@ -18,9 +18,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlsplit
 
 LOGGER = logging.getLogger(__name__)
-MAX_DOWNLOADS_PER_CLIENT = 5
+MAX_DOWNLOADS_PER_CLIENT = 2
 # Bound yt-dlp/FFmpeg CPU and memory use across all visitors, in addition to
-# per-IP fairness and the independent disk quota. Reject invalid limits at startup.
+# per-IP fairness and the free-space reserve. Reject invalid limits at startup.
 MAX_CONCURRENT_DOWNLOADS = int(os.environ.get('DOWNLOAD_MAX_CONCURRENT', '4'))
 if MAX_CONCURRENT_DOWNLOADS <= 0:
     raise ValueError('DOWNLOAD_MAX_CONCURRENT must be a positive integer.')
@@ -112,46 +112,25 @@ DOWNLOAD_FILES = DownloadFiles()
 
 
 class StorageGuard:
-    """Account for every file in the dedicated root, including retained links.
-
-    Walking the root costs time proportional to the files in it, and every active
-    download checks once per interval. All checks within an interval therefore share
-    one measurement, so the walk runs at most once per interval however many
-    downloads are running.
-    """
+    """Keep free disk space available, sharing one check per interval across jobs."""
 
     def __init__(self):
         self.root = Path(os.environ.get('DOWNLOAD_STORAGE_DIR',
                          str(Path(tempfile.gettempdir()) / 'av-downloader')))
-        self.quota = int(os.environ.get('DOWNLOAD_STORAGE_QUOTA_BYTES', 10 * 1024**3))
         self.min_free = int(os.environ.get('DOWNLOAD_MIN_FREE_BYTES', 1024**3))
         self.interval = float(os.environ.get('DOWNLOAD_STORAGE_CHECK_SECONDS', '1'))
-        if self.quota <= 0 or self.min_free < 0 or not 0 < self.interval <= 60:
+        if self.min_free < 0 or not 0 < self.interval <= 60:
             raise ValueError('Invalid downloader storage limits.')
         self.lock = threading.Lock()
-        self.measurement = None  # (measured at, bytes used, bytes free)
-
-    def measure(self):
-        """Walk the root and return (bytes used by its files, bytes free on its disk)."""
-        self.root.mkdir(parents=True, exist_ok=True)
-        used = 0
-        for path in self.root.rglob('*'):
-            try:
-                if path.is_file():
-                    used += path.stat().st_size
-            except FileNotFoundError:
-                pass  # Another request may have just cleaned up its files.
-        return used, shutil.disk_usage(self.root).free
+        self.measurement = None  # (measured at, bytes free)
 
     def check(self):
-        # Callers that arrive during a walk wait for its result rather than walking too.
         with self.lock:
             now = time.monotonic()
             if self.measurement is None or now - self.measurement[0] >= self.interval:
-                self.measurement = (now, *self.measure())
-            _, used, free = self.measurement
-        if used >= self.quota:
-            raise DownloadError('Downloader storage quota reached. Please try again later.')
+                self.root.mkdir(parents=True, exist_ok=True)
+                self.measurement = (now, shutil.disk_usage(self.root).free)
+            _, free = self.measurement
         if free < self.min_free:
             raise DownloadError('Downloader disk space is low. Please try again later.')
 

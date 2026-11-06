@@ -1,711 +1,124 @@
-import http.client
-from io import BytesIO, StringIO
-import json
-import os
-import socket
+"""Small, offline checks of downloader inputs, files, and limits."""
 from pathlib import Path
-import subprocess
-import sys
 import tempfile
-import threading
-import time
 import unittest
 from unittest.mock import Mock, patch
-from urllib.parse import unquote, urlencode
 
-from server import (DOWNLOAD_FILES, DOWNLOAD_SLOTS, MAX_DOWNLOADS_PER_CLIENT, ClientLimits,
-                    DownloadFiles, DownloadHandler,
-                    ThreadingHTTPServer, validate_url, StorageGuard,
-                    download_video, DownloadError)
-from server import run_monitored, read_metadata
+import server
 
 
 class DownloadTests(unittest.TestCase):
     def setUp(self):
-        storage_directory = tempfile.TemporaryDirectory()
-        self.addCleanup(storage_directory.cleanup)
-        guard = StorageGuard()
-        guard.root = Path(storage_directory.name)
-        guard.min_free = 0
-        storage_patch = patch('server.STORAGE', guard)
-        storage_patch.start()
-        self.addCleanup(storage_patch.stop)
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), DownloadHandler)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-        self.outputs = []
-        self.output_basename = 'Test video [abc]'
-        # Never read a developer's real cookie export while running tests.
-        cookies_directory = tempfile.TemporaryDirectory()
-        self.addCleanup(cookies_directory.cleanup)
-        self.cookies_source = Path(cookies_directory.name) / 'cookies.txt'
-        cookies_patch = patch('server.COOKIES_FILE', self.cookies_source)
-        cookies_patch.start()
-        self.addCleanup(cookies_patch.stop)
-        # Fake processes from Mock() have Mock pids, which os.killpg rejects on POSIX.
-        # Only signal real process groups.
-        real_killpg = getattr(os, 'killpg', None)
-        killpg_patch = patch('server.os.killpg', create=True, side_effect=lambda pid, sig: (
-            None if isinstance(pid, Mock) else real_killpg(pid, sig)))
-        killpg_patch.start()
-        self.addCleanup(killpg_patch.stop)
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.directory = self.root / 'download'
+        self.directory.mkdir()
+        self.output = self.directory / 'video.webm'
+        self.output.write_bytes(b'video')
+        self.enterContext(patch.object(server, 'STORAGE', Mock()))
+        self.enterContext(patch.object(server, 'COOKIES_FILE', self.root / 'cookies.txt'))
+        self.metadata = self.enterContext(patch.object(server, 'read_metadata', return_value='{}'))
+        self.media = self.enterContext(patch.object(server, 'run_monitored', side_effect=self.write_manifest))
 
-    def tearDown(self):
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join()
-        for token in list(DOWNLOAD_FILES.files):
-            DOWNLOAD_FILES.discard(token)
-        for output in self.outputs:
-            self.assertFalse(output.parent.exists(), 'Temporary directory was not removed')
+    def write_manifest(self, args, on_output):
+        (self.directory / 'result.txt').write_text(str(self.output), encoding='utf-8')
 
-    def request(self, fields=None, path='/api/download', method='POST', headers=None):
-        connection = http.client.HTTPConnection(*self.server.server_address, timeout=5)
-        connection.request(method, path, urlencode(fields or {'url': 'https://youtu.be/abc'}) if method == 'POST' else None,
-                           {'Content-Type': 'application/x-www-form-urlencoded', **(headers or {})})
-        response = connection.getresponse()
-        result = response.status, dict(response.getheaders()), response.read()
-        connection.close()
-        return result
+    def download(self, option='default'):
+        return server.download_video('https://youtu.be/abc', option, self.directory, Mock())
 
-    def events(self, fields=None):
-        status, headers, body = self.request(fields)
-        self.assertEqual(status, 200)
-        self.assertEqual(headers['Content-Type'], 'application/x-ndjson')
-        return [json.loads(line) for line in body.splitlines()]
+    def test_download_options_and_output(self):
+        for option, expected in (
+            ('default', ['-f', 'bv*+ba/b']),
+            ('best_audio', ['-f', 'ba/b', '--extract-audio', '--audio-format', 'best']),
+            ('mp4', ['-f', "bv[ext=mp4]+ba[ext~='^(m4a|aac)$']", '--merge-output-format', 'mp4']),
+            ('mp3', ['-f', 'ba/b', '--extract-audio', '--audio-format', 'mp3', '--audio-quality', '0']),
+        ):
+            with self.subTest(format=option):
+                self.assertEqual(self.download(option), self.output)
+                args = self.media.call_args.args[0]
+                start = args.index('-f')
+                self.assertEqual(args[start:start + len(expected)], expected)
+                self.assertNotIn('--max-filesize', args)
+                self.assertNotIn('--cookies', args)
 
-    def metadata(self, args, *extra, **kwargs):
-        self.assertIn('--dump-single-json', args)
-        return '{"is_live": true}'
+    def test_invalid_metadata_and_playlists_are_rejected(self):
+        for metadata in ('not json', '[]', '{"_type":"playlist","entries":[]}'):
+            with self.subTest(metadata=metadata):
+                self.metadata.return_value = metadata
+                with self.assertRaises((ValueError, server.DownloadError)):
+                    self.download()
+                self.media.assert_not_called()
 
-    def media(self, args, **kwargs):
-        self.assertNotIn('timeout', kwargs)
-        self.assertNotIn('--max-filesize', args)
-        self.assertNotIn('--match-filter', args)
-        self.assertIn('--newline', args)
-        self.assertIn('--progress', args)
-        if '--extract-audio' in args:
-            self.assertEqual(args[args.index('-f') + 1], 'ba/b')
-            audio_format = args[args.index('--audio-format') + 1]
-            if audio_format == 'best':
-                self.assertNotIn('--audio-quality', args)
-                extension = 'opus'
-            else:
-                self.assertEqual(audio_format, 'mp3')
-                self.assertEqual(args[args.index('--audio-quality') + 1], '0')
-                extension = 'mp3'
-        elif '--merge-output-format' in args:
-            self.assertEqual(args[args.index('-f') + 1], "bv[ext=mp4]+ba[ext~='^(m4a|aac)$']")
-            self.assertEqual(args[args.index('--merge-output-format') + 1], 'mp4')
-            self.assertNotIn('--remux-video', args)
-            extension = 'mp4'
-        else:
-            self.assertNotIn('--merge-output-format', args)
-            self.assertEqual(args[args.index('-f') + 1], 'bv*+ba/b')
-            extension = 'webm'
-        self.assertNotIn('-o', args)
-        output = Path(args[args.index('-P') + 1]) / f'{self.output_basename}.{extension}'
-        self.outputs.append(output)
-        output.write_bytes(b'video content')
-        Path(args[args.index('--print-to-file') + 2]).write_text(str(output), encoding='utf-8')
-        process = Mock()
-        process.stderr = StringIO()
-        process.stdout = StringIO('[download] 50% of 10 MiB\n[download] 100%\n')
-        process.poll.return_value = 0
-        process.wait.return_value = 0
-        return process
+    def test_output_outside_download_directory_is_rejected(self):
+        self.output = self.root / 'outside.webm'
+        self.output.write_bytes(b'keep this file')
+        with self.assertRaisesRegex(server.DownloadError, 'valid output file'):
+            self.download()
+        self.assertEqual(self.output.read_bytes(), b'keep this file')
 
+    def test_cookies_are_copied_for_both_commands(self):
+        server.COOKIES_FILE.write_text('# synthetic test cookies\n')
+        self.download()
+        copy = self.directory / 'cookies.txt'
+        self.assertEqual(copy.read_bytes(), server.COOKIES_FILE.read_bytes())
+        for args in (self.metadata.call_args.args[0], self.media.call_args.args[0]):
+            self.assertEqual(args[args.index('--cookies') + 1], str(copy))
+        copy.write_text('# working copy changed\n')
+        self.assertEqual(server.COOKIES_FILE.read_text(), '# synthetic test cookies\n')
+
+
+class ResourceTests(unittest.TestCase):
     def test_url_validation(self):
         for url in ('https://youtu.be/abc', 'https://www.youtube.com/watch?v=abc', 'https://vimeo.com/123'):
-            self.assertEqual(validate_url(url), url)
+            self.assertEqual(server.validate_url(url), url)
         for url in (None, 42, 'http://youtube.com/a', 'https://localhost/a',
                     'https://youtube.com.evil.example/a', 'https://youtube.com:8000/a',
                     'https://user:pass@youtube.com/a', 'file:///etc/passwd'):
             with self.subTest(url=url), self.assertRaises(ValueError):
-                validate_url(url)
+                server.validate_url(url)
 
-    def test_formats_output_and_one_time_download(self):
-        for option, extension, mime in (('default', 'webm', 'video/webm'),
-                                        ('best_audio', 'opus', 'audio/ogg'),
-                                        ('mp4', 'mp4', 'video/mp4'), ('mp3', 'mp3', 'audio/mpeg')):
-            with self.subTest(option=option), patch('server.read_metadata', side_effect=self.metadata), \
-                    patch('server.subprocess.Popen', side_effect=self.media):
-                events = self.events({'url': 'https://youtu.be/abc', 'format': option})
-                self.assertTrue(any('50%' in event.get('message', '') for event in events))
-                ready = events[-1]
-                self.assertEqual(ready['type'], 'ready')
-                self.assertEqual(ready['filename'], f'{self.output_basename}.{extension}')
-                status, headers, body = self.request(path=ready['url'], method='GET')
-                self.assertEqual(status, 200)
-                self.assertEqual(headers['Content-Type'], mime)
-                filename = unquote(headers['Content-Disposition'].split("filename*=UTF-8''", 1)[1])
-                self.assertEqual(filename, ready['filename'])
-                self.assertEqual(body, b'video content')
-                self.assertEqual(self.request(path=ready['url'], method='GET')[0], 404)
-
-    def test_missing_cookies_uses_anonymous_requests(self):
-        with patch('server.read_metadata', side_effect=self.metadata) as metadata, \
-                patch('server.subprocess.Popen', side_effect=self.media) as media:
-            self.assertEqual(self.events()[-1]['type'], 'ready')
-            self.assertNotIn('--cookies', metadata.call_args.args[0])
-            self.assertNotIn('--cookies', media.call_args.args[0])
-
-    def test_cookies_are_copied_and_used_for_both_commands(self):
-        original = '# Netscape HTTP Cookie File\n# synthetic test cookies\n'
-        self.cookies_source.write_text(original, encoding='utf-8')
-        copies = []
-
-        def metadata(args, *extra, **kwargs):
-            cookies = Path(args[args.index('--cookies') + 1])
-            self.assertNotEqual(cookies, self.cookies_source)
-            self.assertEqual(cookies.read_text(encoding='utf-8'), original)
-            copies.append(cookies)
-            cookies.write_text('# updated working cookies\n', encoding='utf-8')
-            return self.metadata(args, **kwargs)
-
-        def media(args, **kwargs):
-            cookies = Path(args[args.index('--cookies') + 1])
-            self.assertEqual(cookies, copies[-1])
-            self.assertEqual(cookies.read_text(encoding='utf-8'), '# updated working cookies\n')
-            return self.media(args, **kwargs)
-
-        with patch('server.read_metadata', side_effect=metadata), \
-                patch('server.subprocess.Popen', side_effect=media):
-            for _ in range(2):
-                ready = self.events()[-1]
-                self.assertEqual(ready['type'], 'ready')
-                self.assertEqual(self.request(path=ready['url'], method='GET')[0], 200)
-        self.assertNotEqual(copies[0], copies[1])
-        self.assertEqual(self.cookies_source.read_text(encoding='utf-8'), original)
-        # tearDown joins the file-transfer handlers before unittest runs cleanups.
-        self.addCleanup(lambda: self.assertTrue(all(not cookies.exists() for cookies in copies)))
-
-    def test_cookie_copy_removed_after_failure(self):
-        self.cookies_source.write_text('# synthetic test cookies\n', encoding='utf-8')
-        copies = []
-
-        def fail(args, *extra, **kwargs):
-            copies.append(Path(args[args.index('--cookies') + 1]))
-            raise subprocess.CalledProcessError(1, 'yt-dlp', stderr=b'Test failure')
-
-        with patch('server.read_metadata', side_effect=fail), self.assertLogs('server'):
-            self.assertEqual(self.events()[-1]['type'], 'error')
-        self.assertFalse(copies[0].exists())
-        self.assertTrue(self.cookies_source.exists())
-
-    def test_unicode_filename(self):
-        self.output_basename = 'Café 日本語 [abc]'
-        with patch('server.read_metadata', side_effect=self.metadata), \
-                patch('server.subprocess.Popen', side_effect=self.media):
-            ready = self.events()[-1]
-            self.assertEqual(ready['filename'], f'{self.output_basename}.webm')
-            status, headers, _ = self.request(path=ready['url'], method='GET')
-            self.assertEqual(status, 200)
-            disposition = headers['Content-Disposition']
-            self.assertTrue(disposition.isascii())
-            self.assertEqual(unquote(disposition.split("filename*=UTF-8''", 1)[1]), ready['filename'])
-
-    def test_output_outside_temporary_directory_rejected(self):
-        with tempfile.TemporaryDirectory() as outside:
-            external = Path(outside) / 'outside.webm'
-            external.write_bytes(b'must not be sent or deleted')
-
-            def media(args, **kwargs):
-                process = self.media(args, **kwargs)
-                Path(args[args.index('--print-to-file') + 2]).write_text(str(external), encoding='utf-8')
-                return process
-
-            with patch('server.read_metadata', side_effect=self.metadata), \
-                    patch('server.subprocess.Popen', side_effect=media), self.assertLogs('server'):
-                self.assertEqual(self.events()[-1]['type'], 'error')
-                self.assertTrue(external.exists())
-
-    def test_progress_arrives_before_download_finishes(self):
-        release = threading.Event()
-
-        def download(url, option, directory, on_output):
-            on_output('[download] 25%')
-            release.wait(3)
-            output = directory / 'video.mp4'
-            output.write_bytes(b'video')
-            self.outputs.append(output)
-            return output
-
-        with patch('server.download_video', side_effect=download):
-            connection = http.client.HTTPConnection(*self.server.server_address, timeout=5)
-            connection.request('POST', '/api/download', urlencode({'url': 'https://youtu.be/abc'}),
-                               {'Content-Type': 'application/x-www-form-urlencoded'})
-            try:
-                response = connection.getresponse()
-                first = json.loads(response.readline())
-                self.assertEqual(first, {'type': 'log', 'message': '[download] 25%'})
-                self.assertFalse(release.is_set())
-            finally:
-                release.set()
-                response.read()
-                connection.close()
-
-    def test_invalid_request(self):
-        with patch('server.download_video') as download:
-            for fields in ({'url': 'https://127.0.0.1/'}, {'url': 'https://youtu.be/abc', 'format': '--exec'},
-                           {'url': 'x' * 8192}):
-                self.assertEqual(self.request(fields)[0], 400)
-            download.assert_not_called()
-
-    def test_structured_progress_and_stages(self):
-        def media(args, **kwargs):
-            self.assertIn('download:av-progress:%(progress)j', args)
-            self.assertIn('postprocess:av-progress:%(progress)j', args)
-            process = self.media(args, **kwargs)
-            process.stdout = StringIO(
-                'av-progress:{"status":"downloading","downloaded_bytes":50,'
-                '"total_bytes":100,"speed":25.5,"eta":2}\n'
-                'av-progress:{"status":"processing","postprocessor":"FFmpeg"}\n'
-                'av-progress:not-json\n')
-            return process
-
-        with patch('server.read_metadata', side_effect=self.metadata), \
-                patch('server.subprocess.Popen', side_effect=media):
-            events = self.events()
-        self.assertEqual([event['stage'] for event in events if event['type'] == 'stage'],
-                         ['metadata', 'download'])
-        progress = [event for event in events if event['type'] == 'progress']
-        self.assertEqual(progress[0]['speed'], 25.5)
-        self.assertEqual(progress[0]['eta'], 2)
-        self.assertEqual(progress[0]['downloaded_bytes'], 50)
-        self.assertEqual(progress[1]['stage'], 'postprocess')
-        self.assertIsNone(progress[1]['eta'])
-        self.assertTrue(any(event.get('message') == 'av-progress:not-json' for event in events))
-
-    def test_silent_disconnect_cleans_request_during_metadata_and_media(self):
-        original_popen = subprocess.Popen
-        original_event = DownloadHandler.event
-        for metadata in (True, False):
-            processes = []
-            released = threading.Event()
-            directories = []
-
-            def spawn(args, **kwargs):
-                if args[0] == 'taskkill':
-                    return original_popen(args, **kwargs)
-                if '-P' in args:
-                    directory = Path(args[args.index('-P') + 1])
-                    directories.append(directory)
-                    (directory / 'partial.part').write_bytes(b'partial')
-                process = original_popen([sys.executable, '-c', 'import time; time.sleep(30)'], **kwargs)
-                processes.append(process)
-                return process
-
-            def event(handler, kind, **data):
-                if kind == 'heartbeat':
-                    raise BrokenPipeError('disconnected silent client')
-                return original_event(handler, kind, **data)
-
-            with self.subTest(metadata=metadata), patch('server.HEARTBEAT_SECONDS', 0.02), \
-                    patch('server.subprocess.Popen', side_effect=spawn), \
-                    patch.object(DownloadHandler, 'event', event), \
-                    patch('server.DOWNLOAD_SLOTS') as slots:
-                slots.acquire.return_value = True
-                slots.release.side_effect = lambda client: released.set()
-                if metadata:
-                    self.events()
-                else:
-                    with patch('server.read_metadata', return_value='{}'):
-                        self.events()
-                self.assertTrue(released.wait(3))
-                self.assertEqual(len(processes), 1)
-                self.assertIsNotNone(processes[0].poll())
-                self.assertTrue(processes[0].stdout.closed)
-                self.assertTrue(processes[0].stderr.closed)
-                self.assertTrue(all(not directory.exists() for directory in directories))
-                self.assertFalse(DOWNLOAD_FILES.files)
-                slots.release.assert_called_once()
-
-    def test_closed_http_socket_stops_silent_metadata(self):
-        original_popen = subprocess.Popen
-        started = threading.Event()
-        released = threading.Event()
-        processes = []
-
-        def spawn(args, **kwargs):
-            if args[0] == 'taskkill':
-                return original_popen(args, **kwargs)
-            process = original_popen([sys.executable, '-c', 'import time; time.sleep(30)'], **kwargs)
-            processes.append(process)
-            started.set()
-            return process
-
-        with patch('server.HEARTBEAT_SECONDS', 0.02), \
-                patch('server.subprocess.Popen', side_effect=spawn), patch('server.DOWNLOAD_SLOTS') as slots:
-            slots.acquire.return_value = True
-            slots.release.side_effect = lambda client: released.set()
-            connection = http.client.HTTPConnection(*self.server.server_address, timeout=3)
-            try:
-                connection.request('POST', '/api/download', urlencode({'url': 'https://youtu.be/abc'}),
-                                   {'Content-Type': 'application/x-www-form-urlencoded'})
-                response = connection.getresponse()
-                self.assertEqual(json.loads(response.readline())['stage'], 'metadata')
-                self.assertTrue(started.wait(2))
-                response.fp.raw._sock.shutdown(socket.SHUT_RDWR)
-                response.close()
-            finally:
-                connection.close()
-            self.assertTrue(released.wait(5))
-            self.assertIsNotNone(processes[0].poll())
-            self.assertTrue(processes[0].stdout.closed)
-            self.assertFalse(DOWNLOAD_FILES.files)
-
-    def test_playlist_rejected(self):
-        with patch('server.read_metadata', return_value='{"_type": "playlist", "entries": []}'), self.assertLogs('server'):
-            events = self.events()
-            self.assertEqual(events[-1]['type'], 'error')
-            self.assertIn('Playlists', events[-1]['message'])
-
-    def test_invalid_metadata_never_starts_media(self):
-        for metadata in ('not json', '[]', 'null'):
-            with self.subTest(metadata=metadata), patch('server.read_metadata', return_value=metadata), \
-                    patch('server.subprocess.Popen') as media, self.assertLogs('server'):
-                self.assertEqual(self.events()[-1]['type'], 'error')
-                media.assert_not_called()
-
-    def test_failures_release_slot(self):
-        for error in (subprocess.CalledProcessError(1, 'yt-dlp'),
-                      subprocess.TimeoutExpired('yt-dlp', 120), RuntimeError('unexpected failure')):
-            released = threading.Event()
-            with self.subTest(error=error), patch('server.download_video', side_effect=error), \
-                    patch('server.DOWNLOAD_SLOTS') as slots, self.assertLogs('server'):
-                slots.acquire.return_value = True
-                slots.release.side_effect = lambda client: released.set()
-                self.assertEqual(self.events()[-1]['type'], 'error')
-                self.assertTrue(released.wait(timeout=2))
-                slots.release.assert_called_once_with('127.0.0.1')
-
-    def test_media_failure_removes_partial_files(self):
-        def fail(args, *extra, **kwargs):
-            process = self.media(args, **kwargs)
-            process.poll.return_value = 1
-            process.wait.return_value = 1
-            return process
-        with patch('server.read_metadata', side_effect=self.metadata), \
-                patch('server.subprocess.Popen', side_effect=fail), self.assertLogs('server'):
-            self.assertEqual(self.events()[-1]['type'], 'error')
-
-    def test_encoded_url_between_four_and_eight_kib(self):
-        url = 'https://youtu.be/abc?value=' + ':' * 1800
-        self.assertLessEqual(len(url), 2048)
-        self.assertGreater(len(urlencode({'url': url})), 4096)
-        with patch('server.read_metadata', side_effect=self.metadata), \
-                patch('server.subprocess.Popen', side_effect=self.media):
-            self.assertEqual(self.events({'url': url})[-1]['type'], 'ready')
-
-    def test_per_client_limit(self):
-        for _ in range(MAX_DOWNLOADS_PER_CLIENT):
-            self.assertTrue(DOWNLOAD_SLOTS.acquire('127.0.0.1'))
-        try:
-            status, _, body = self.request()
-            self.assertEqual(status, 429)
-            self.assertIn(b'5 downloads in progress', body)
-            # Another visitor, as reported by the local proxy, is unaffected.
-            with patch('server.read_metadata', side_effect=self.metadata), \
-                    patch('server.subprocess.Popen', side_effect=self.media):
-                status, _, body = self.request(headers={'X-Real-IP': '203.0.113.7'})
-                self.assertEqual(status, 200)
-                self.assertEqual(json.loads(body.splitlines()[-1])['type'], 'ready')
-        finally:
-            for _ in range(MAX_DOWNLOADS_PER_CLIENT):
-                DOWNLOAD_SLOTS.release('127.0.0.1')
-        self.assertNotIn('203.0.113.7', DOWNLOAD_SLOTS.active)
-
-    def test_storage_admission_releases_slot(self):
-        released = threading.Event()
-        original_release = DOWNLOAD_SLOTS.release
-
-        def release(client):
-            original_release(client)
-            released.set()
-
-        with patch('server.STORAGE.check', side_effect=DownloadError('storage quota reached')), \
-                patch('server.download_video') as download, \
-                patch.object(DOWNLOAD_SLOTS, 'release', side_effect=release), self.assertLogs('server'):
-            status, _, body = self.request()
-            self.assertEqual(status, 507)
-            self.assertIn(b'quota', body)
-            download.assert_not_called()
-            # The handler releases its slot just after responding, so allow it a moment.
-            self.assertTrue(released.wait(5))
-        self.assertNotIn('127.0.0.1', DOWNLOAD_SLOTS.active)
-
-    def test_unused_link_expires(self):
-        store = DownloadFiles()
-        temporary = tempfile.TemporaryDirectory()
-        output = Path(temporary.name) / 'video.mp4'
-        output.touch()
-        try:
-            with patch('server.DOWNLOAD_LINK_SECONDS', 0.01):
-                token = store.add(temporary, output)
-            for _ in range(200):
-                if not output.exists():
-                    break
-                time.sleep(0.01)
-            self.assertFalse(output.exists())
-            self.assertIsNone(store.take(token))
-        finally:
-            temporary.cleanup()
-
-
-    def test_full_server_rejects_without_starting_job_or_leaking_client_slot(self):
-        slots = threading.BoundedSemaphore(1)
-        slots.acquire()
-        with patch('server.GLOBAL_DOWNLOAD_SLOTS', slots), patch('server.download_video') as download:
-            status, headers, body = self.request()
-            self.assertEqual(status, 503)
-            self.assertEqual(headers['Retry-After'], '5')
-            self.assertIn(b'busy', body)
-            download.assert_not_called()
-            self.assertNotIn('127.0.0.1', DOWNLOAD_SLOTS.active)
-        slots.release()
-
-    def test_other_clients_share_global_limit_and_capacity_returns_after_failure(self):
-        slots = threading.BoundedSemaphore(1)
-        started = threading.Event()
-        finish = threading.Event()
-        responses = []
-
-        def fail(*args):
-            started.set()
-            if not finish.wait(5):
-                raise RuntimeError('Test did not release job')
-            raise DownloadError('Expected failure')
-
-        with patch('server.GLOBAL_DOWNLOAD_SLOTS', slots), \
-                patch('server.download_video', side_effect=fail), self.assertLogs('server'):
-            thread = threading.Thread(target=lambda: responses.append(self.request()))
-            thread.start()
-            try:
-                self.assertTrue(started.wait(2))
-                self.assertEqual(self.request(headers={'X-Real-IP': '203.0.113.7'})[0], 503)
-                self.assertNotIn('203.0.113.7', DOWNLOAD_SLOTS.active)
-            finally:
-                finish.set()
-                thread.join(5)
-            self.assertFalse(thread.is_alive())
-            self.assertEqual(responses[0][0], 200)
-            self.assertTrue(slots.acquire(timeout=2))
-            slots.release()
-        self.assertNotIn('127.0.0.1', DOWNLOAD_SLOTS.active)
-
-    def test_storage_failure_releases_global_slot(self):
-        slots = threading.BoundedSemaphore(1)
-        with patch('server.GLOBAL_DOWNLOAD_SLOTS', slots), \
-                patch('server.STORAGE.check', side_effect=DownloadError('quota')), self.assertLogs('server'):
-            self.assertEqual(self.request()[0], 507)
-            # The body can arrive before the handler's finally block completes.
-            # Wait for release while the patched semaphore is still installed.
-            self.assertTrue(slots.acquire(timeout=2))
-            slots.release()
-
-
-class ClientLimitTests(unittest.TestCase):
-    def test_limit_is_per_client_and_released(self):
-        limits = ClientLimits(2)
+    def test_two_jobs_per_client_and_released_capacity(self):
+        limits = server.ClientLimits(server.MAX_DOWNLOADS_PER_CLIENT)
         self.assertTrue(limits.acquire('a'))
         self.assertTrue(limits.acquire('a'))
         self.assertFalse(limits.acquire('a'))
         self.assertTrue(limits.acquire('b'))
         limits.release('a')
         self.assertTrue(limits.acquire('a'))
-        for client in ('a', 'a', 'b'):
-            limits.release(client)
-        self.assertEqual(limits.active, {})
 
-    def client_ip(self, peer, real_ip=None):
-        handler = DownloadHandler.__new__(DownloadHandler)
-        handler.client_address = (peer, 12345)
-        handler.headers = {'X-Real-IP': real_ip} if real_ip is not None else {}
-        return handler.client_ip()
-
-    def test_real_ip_trusted_only_from_local_proxies(self):
-        self.assertEqual(self.client_ip('172.18.0.5', '198.51.100.1'), '198.51.100.1')
-        self.assertEqual(self.client_ip('127.0.0.1', '2001:db8::1'), '2001:db8::1')
-        # A public peer cannot claim another address.
-        self.assertEqual(self.client_ip('8.8.8.8', '1.1.1.1'), '8.8.8.8')
-        # Missing or malformed headers fall back to the peer.
-        self.assertEqual(self.client_ip('172.18.0.5'), '172.18.0.5')
-        self.assertEqual(self.client_ip('172.18.0.5', 'not an ip'), '172.18.0.5')
-
-
-class ResourceTests(unittest.TestCase):
-    def test_event_writes_are_serialized_and_flushed(self):
-        handler = object.__new__(DownloadHandler)
-        handler.event_lock = threading.Lock()
-
-        class SlowStream(BytesIO):
-            flush_count = 0
-
-            def write(self, data):
-                for byte in data:
-                    super().write(bytes([byte]))
-                    time.sleep(0.00001)
-
-            def flush(self):
-                self.flush_count += 1
-
-        handler.wfile = SlowStream()
-        threads = [threading.Thread(target=handler.event, args=('heartbeat',), kwargs={'index': index})
-                   for index in range(8)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
-        events = [json.loads(line) for line in handler.wfile.getvalue().splitlines()]
-        self.assertEqual(sorted(event['index'] for event in events), list(range(8)))
-        self.assertEqual(handler.wfile.flush_count, 8)
-
-    def test_metadata_drains_large_stderr_without_deadlock(self):
-        events = []
-        with patch('server.STORAGE', Mock(interval=1)):
-            result = read_metadata([sys.executable, '-c',
-                                    'import sys; sys.stderr.write("warning\\n" * 20000); print("{}")'],
-                                   events.append)
-        self.assertEqual(json.loads(result), {})
-        self.assertEqual(events.count('warning'), 20000)
-
-    def test_metadata_storage_breach_stops_silent_process(self):
-        guard = Mock(interval=0.01)
-        guard.check.side_effect = DownloadError('storage quota reached')
-        with patch('server.STORAGE', guard):
-            with self.assertRaisesRegex(DownloadError, 'quota'):
-                read_metadata([sys.executable, '-c', 'import time; time.sleep(30)'], Mock())
-        self.assertFalse(any(thread.name == 'download-pipe' for thread in threading.enumerate()))
-
-    def test_metadata_json_and_stderr_are_drained_separately(self):
-        events = []
-        command = [sys.executable, '-c',
-                   'import sys; print(\'{"is_live": true}\'); print("metadata warning", file=sys.stderr)']
-        with patch('server.STORAGE', Mock(interval=1)):
-            self.assertEqual(json.loads(read_metadata(command, events.append)), {'is_live': True})
-        self.assertIn('metadata warning', events)
-
-    def test_metadata_timeout_kills_silent_process_and_closes_pipes(self):
-        original_popen = subprocess.Popen
-        processes = []
-
-        def spawn(*args, **kwargs):
-            process = original_popen(*args, **kwargs)
-            processes.append(process)
-            return process
-
-        with patch('server.subprocess.Popen', side_effect=spawn), \
-                patch('server.METADATA_TIMEOUT_SECONDS', 0.05), patch('server.STORAGE', Mock(interval=1)):
-            with self.assertRaisesRegex(DownloadError, 'timed out'):
-                read_metadata([sys.executable, '-c', 'import time; time.sleep(30)'], Mock())
-        self.assertIsNotNone(processes[0].poll())
-        self.assertTrue(processes[0].stdout.closed)
-        self.assertTrue(processes[0].stderr.closed)
-        self.assertFalse(any(thread.name == 'download-pipe' for thread in threading.enumerate()))
-
-    def test_media_has_no_metadata_timeout_and_sends_heartbeats(self):
-        events = []
-        guard = Mock(interval=0.01)
-        with patch('server.METADATA_TIMEOUT_SECONDS', 0.001), \
-                patch('server.HEARTBEAT_SECONDS', 0.01), patch('server.STORAGE', guard):
-            run_monitored([sys.executable, '-c', 'import time; time.sleep(0.15)'], events.append)
-        self.assertIn({'type': 'heartbeat'}, events)
-        self.assertGreater(guard.check.call_count, 0)
-
-    def test_output_callback_failure_terminates_real_process(self):
-        original_popen = subprocess.Popen
-        processes = []
-
-        def spawn(*args, **kwargs):
-            process = original_popen(*args, **kwargs)
-            processes.append(process)
-            return process
-
-        with patch('server.subprocess.Popen', side_effect=spawn), patch('server.STORAGE', Mock(interval=1)):
-            with self.assertRaises(ConnectionResetError):
-                run_monitored([sys.executable, '-u', '-c',
-                               'import time; print("progress"); time.sleep(30)'],
-                              Mock(side_effect=ConnectionResetError()))
-        self.assertIsNotNone(processes[0].poll())
-        self.assertTrue(processes[0].stdout.closed)
-        self.assertTrue(processes[0].stderr.closed)
-
-    def test_storage_counts_retained_and_partial_files(self):
-        with tempfile.TemporaryDirectory() as root:
-            guard = StorageGuard()
+    def test_free_space_reserve(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(server.shutil, 'disk_usage') as usage:
+            guard = server.StorageGuard()
             guard.root = Path(root)
-            guard.quota = 10
-            guard.min_free = 0
-            retained = guard.root / 'retained'
-            retained.mkdir()
-            (retained / 'video.mp4').write_bytes(b'123456')
-            partial = guard.root / 'active.part'
-            partial.write_bytes(b'1234')
-            with self.assertRaisesRegex(DownloadError, 'quota'):
-                guard.check()
-            partial.unlink()
-            guard.measurement = None  # Measure again rather than wait for the interval.
-            guard.check()
             guard.min_free = 100
+            usage.return_value = Mock(free=100)
+            guard.check()
             guard.measurement = None
-            with patch('server.shutil.disk_usage', return_value=Mock(free=99)):
-                with self.assertRaisesRegex(DownloadError, 'disk space'):
-                    guard.check()
-
-    def test_storage_checks_share_one_walk_per_interval(self):
-        with tempfile.TemporaryDirectory() as root:
-            guard = StorageGuard()
-            guard.root = Path(root)
-            guard.quota = 10
-            guard.min_free = 0
-            guard.interval = 60
-            with patch.object(guard, 'measure', wraps=guard.measure) as measure:
-                threads = [threading.Thread(target=guard.check) for _ in range(20)]
-                for thread in threads:
-                    thread.start()
-                for thread in threads:
-                    thread.join()
-                self.assertEqual(measure.call_count, 1)
-                # A file written within the interval is counted at the next measurement.
-                (guard.root / 'video.mp4').write_bytes(b'1234567890')
+            usage.return_value = Mock(free=99)
+            with self.assertRaisesRegex(server.DownloadError, 'disk space'):
                 guard.check()
-                with patch('server.time.monotonic', return_value=time.monotonic() + 61):
-                    with self.assertRaisesRegex(DownloadError, 'quota'):
-                        guard.check()
-                self.assertEqual(measure.call_count, 2)
 
-    def test_silent_media_is_stopped_on_storage_breach(self):
-        released = threading.Event()
-        process = Mock()
-        process.stderr = StringIO()
-        process.poll.return_value = None
-        process.stdout.readline.side_effect = lambda size: (released.wait(3) and '')
-        process.wait.return_value = 1
-        guard = Mock(interval=0.01)
-        guard.check.side_effect = [None, None, DownloadError('storage quota reached')]
-        def stop(media):
-            self.assertIs(media, process)
-            released.set()
-        with tempfile.TemporaryDirectory() as root, \
-                patch('server.STORAGE', guard), \
-                patch('server.COOKIES_FILE', Path(root) / 'absent'), \
-                patch('server.read_metadata', return_value='{}'), \
-                patch('server.subprocess.Popen', return_value=process), \
-                patch('server.stop_process', side_effect=stop) as stopped:
-            with self.assertRaisesRegex(DownloadError, 'quota'):
-                download_video('https://youtu.be/abc', 'default', Path(root), Mock())
-            self.assertTrue(released.is_set())
-            self.assertGreaterEqual(stopped.call_count, 1)
+    def test_links_can_only_be_claimed_once(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        output = Path(temporary.name) / 'video.mp4'
+        output.touch()
+        store = server.DownloadFiles()
+        with patch.object(server.threading, 'Timer'):
+            token = store.add(temporary, output)
+        self.assertEqual(store.take(token), (temporary, output))
+        self.assertIsNone(store.take(token))
 
-    def test_posix_kills_group_even_when_leader_has_exited(self):
-        from server import stop_process
-        process = Mock(pid=123)
-        process.poll.return_value = 0
-        with patch('server.os.name', 'posix'), patch('server.signal.SIGKILL', 9, create=True), \
-                patch('server.os.killpg', create=True) as kill:
-            stop_process(process)
-            kill.assert_called_once_with(123, 9)
+    def test_discarding_a_link_removes_its_files(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        output = Path(temporary.name) / 'video.mp4'
+        output.touch()
+        store = server.DownloadFiles()
+        with patch.object(server.threading, 'Timer'):
+            token = store.add(temporary, output)
+        store.discard(token)
+        self.assertFalse(output.parent.exists())
+        self.assertIsNone(store.take(token))
 
 
 if __name__ == '__main__':

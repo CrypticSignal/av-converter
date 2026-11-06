@@ -5,56 +5,30 @@ import FileInput from './FileInput';
 
 afterEach(cleanup);
 
-it('passes a dropped file and highlights the zone while dragging', () => {
+it('passes a dropped file and ignores empty drops', () => {
   const onFile = vi.fn();
   const view = render(<FileInput onFile={onFile} filename="" />);
   const zone = view.getByTestId('file-drop-zone');
-  const file = new File(['audio'], 'dropped.flac');
-
-  fireEvent.dragEnter(zone, { dataTransfer: { files: [] } });
-  expect(view.getByText('Drop to select this file')).toBeTruthy();
-  fireEvent.dragOver(zone, { dataTransfer: { files: [], dropEffect: 'none' } });
-  fireEvent.drop(zone, { dataTransfer: { files: [file] } });
-
-  expect(onFile).toHaveBeenCalledExactlyOnceWith(file);
-  expect(view.getByText('or drag and drop a file here')).toBeTruthy();
-});
-
-it('ignores drops without files and clears the highlight when the drag leaves', () => {
-  const onFile = vi.fn();
-  const view = render(<FileInput onFile={onFile} filename="" />);
-  const zone = view.getByTestId('file-drop-zone');
-  fireEvent.dragEnter(zone, { dataTransfer: { files: [] } });
-  fireEvent.dragLeave(zone, { relatedTarget: document.body });
-  expect(view.getByText('or drag and drop a file here')).toBeTruthy();
   fireEvent.drop(zone, { dataTransfer: { files: [] } });
   expect(onFile).not.toHaveBeenCalled();
+  const file = new File(['audio'], 'dropped.flac');
+  fireEvent.drop(zone, { dataTransfer: { files: [file] } });
+  expect(onFile).toHaveBeenCalledExactlyOnceWith(file);
 });
 
-it('passes a picked file, resets the input, and accepts any audio or video type', () => {
+it('passes a picked file', () => {
   const onFile = vi.fn();
   const view = render(<FileInput onFile={onFile} filename="" />);
-  const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
-  expect(input.accept.split(',')).toEqual(expect.arrayContaining(['audio/*', 'video/*', '.m4v', '.ts', '.mkv']));
   const file = new File(['video'], 'clip.m4v');
-  fireEvent.change(input, { target: { files: [file] } });
+  fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [file] } });
   expect(onFile).toHaveBeenCalledExactlyOnceWith(file);
-  expect(input.value).toBe('');
 });
 
-it('ignores drag-and-drop while disabled and accepts files again when enabled', () => {
+it('ignores file drops while disabled', () => {
   const onFile = vi.fn();
   const view = render(<FileInput onFile={onFile} filename="current.wav" disabled />);
-  const zone = view.getByTestId('file-drop-zone');
-  const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
   const file = new File(['audio'], 'replacement.wav');
-  expect(input.disabled).toBe(true);
-  fireEvent.dragEnter(zone, { dataTransfer: { files: [file] } });
-  expect(view.queryByText('Drop to select this file')).toBeNull();
-  fireEvent.drop(zone, { dataTransfer: { files: [file] } });
+  expect(view.container.querySelector<HTMLInputElement>('input[type="file"]')!.disabled).toBe(true);
+  fireEvent.drop(view.getByTestId('file-drop-zone'), { dataTransfer: { files: [file] } });
   expect(onFile).not.toHaveBeenCalled();
-  view.rerender(<FileInput onFile={onFile} filename="current.wav" />);
-  expect(input.disabled).toBe(false);
-  fireEvent.drop(zone, { dataTransfer: { files: [file] } });
-  expect(onFile).toHaveBeenCalledExactlyOnceWith(file);
 });

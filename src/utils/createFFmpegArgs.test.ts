@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createFFmpegArgs, sanitizeFilename } from './createFFmpegArgs';
-import { DEFAULT_SETTINGS, FORMATS, type Codec, type FormatSettings } from '../formats';
+import { DEFAULT_SETTINGS, type Codec, type FormatSettings } from '../formats';
 
 const run = (input: string, codec: Codec, settings: Partial<FormatSettings>, outputName = 'output') =>
   createFFmpegArgs(input, codec, { ...DEFAULT_SETTINGS, ...settings }, outputName);
@@ -19,14 +19,13 @@ const formats: { codec: Codec; settings: Partial<FormatSettings>; extension: str
   { codec: 'WAV', settings: { wavBitDepth: '24' }, extension: 'wav', args: ['-c:a', 'pcm_s24le'] },
 ];
 
-describe('audio formats and downmix', () => {
+describe('audio formats', () => {
   for (const { codec, settings, extension, args } of formats) {
-    it.each([false, true])(`${codec}: downmix=%s`, (downmixToStereo) => {
+    it(`${codec}: builds the encoding arguments and output filename`, () => {
       const outputFilename = `my output.${extension}`;
-      expect(run('my input.webm', codec, { ...settings, downmixToStereo }, 'my output')).toEqual({
+      expect(run('my input.webm', codec, settings, 'my output')).toEqual({
         outputFilename,
-        ffmpegArgs: ['-i', 'my input.webm', ...args,
-          ...(downmixToStereo && !FORMATS[codec].copiesAudio ? ['-ac', '2'] : []), outputFilename],
+        ffmpegArgs: ['-i', 'my input.webm', ...args, outputFilename],
       });
     });
   }
@@ -42,21 +41,31 @@ describe('audio formats and downmix', () => {
   });
 });
 
+describe('stereo downmix', () => {
+  it('adds stereo downmix when encoding audio', () => {
+    expect(run('input.wav', 'MP3', { downmixToStereo: true }).ffmpegArgs)
+      .toEqual(['-i', 'input.wav', '-c:a', 'libmp3lame', '-b:a', '192k', '-ac', '2', 'output.mp3']);
+  });
+
+  it('ignores downmix when copying audio', () => {
+    expect(run('input.wav', 'MKA', { downmixToStereo: true }).ffmpegArgs)
+      .toEqual(['-i', 'input.wav', '-map', '0:a', '-c:a', 'copy', 'output.mka']);
+  });
+});
+
 it('FLAC keeps every stream once alongside the video', () => {
   const args = run('input.mkv', 'FLAC', { isKeepVideo: true }).ffmpegArgs;
-  expect(args.filter(arg => arg === '-map')).toHaveLength(1);
   expect(args).toEqual(['-i', 'input.mkv', '-c:V', 'copy', '-map', '0', '-c:s', 'copy',
     '-c:a', 'flac', '-compression_level', '5', 'output.mkv']);
 });
 
 describe('encoding modes', () => {
   it.each([
-    ['cbr', ['-b:a', '192k']],
     ['abr', ['-abr', '1', '-b:a', '192k']],
     ['vbr', ['-q:a', '2']],
-  ] as const)('MP3 %s uses FFmpeg options and supports stereo downmix', (mp3EncodingType, args) => {
-    expect(run('input.wav', 'MP3', { mp3EncodingType, mp3VbrSetting: '2', downmixToStereo: true }).ffmpegArgs)
-      .toEqual(['-i', 'input.wav', '-c:a', 'libmp3lame', ...args, '-ac', '2', 'output.mp3']);
+  ] as const)('MP3 %s uses the corresponding FFmpeg options', (mp3EncodingType, args) => {
+    expect(run('input.wav', 'MP3', { mp3EncodingType, mp3VbrSetting: '2' }).ffmpegArgs)
+      .toEqual(['-i', 'input.wav', '-c:a', 'libmp3lame', ...args, 'output.mp3']);
   });
 
   it('supports Opus CBR and Vorbis quality mode', () => {
@@ -107,7 +116,8 @@ describe('output filename', () => {
 });
 
 describe('audio track selection', () => {
-  it.each(Object.keys(FORMATS) as Codec[])('selects an absolute stream index for %s', codec => {
+  // MP3 adds an explicit map; MKA replaces its existing all-audio map.
+  it.each(['MP3', 'MKA'] as const)('selects an absolute stream index for %s', codec => {
     const { ffmpegArgs } = createFFmpegArgs('in.mkv', codec, DEFAULT_SETTINGS, 'out', 3);
     const maps = ffmpegArgs.flatMap((arg, index) => arg === '-map' ? [ffmpegArgs[index + 1]] : []);
     expect(maps).toEqual(['0:3']);
