@@ -12,12 +12,12 @@ import { convertFile, loadFFmpeg, type ConvertedFile } from '../utils/convertFil
 import OperationStatus from '../components/OperationStatus';
 import type { OperationProgress } from '../utils/progress';
 import Button from '@mui/material/Button';
-import { createFFmpegArgs } from '../utils/createFFmpegArgs';
+import { allowsAllAudioTracks, createFFmpegArgs, type AudioTrack } from '../utils/createFFmpegArgs';
 import { formatCommand } from '../utils/parseArgs';
 import { manualCommandArgs } from '../utils/manualCommand';
 import { formatBytes } from '../utils/progress';
 import { loadSettings, saveSettings } from '../utils/savedSettings';
-import { probeFile } from '../utils/probeFile';
+import { probeFile, type StreamInfo } from '../utils/probeFile';
 import MediaInfoPanel, { type MediaInfoState } from '../components/MediaInfoPanel';
 import { FORMATS, type Codec, type FormatSettings, type SetSetting } from '../formats';
 // General Components
@@ -37,11 +37,17 @@ import InputAdornment from '@mui/material/InputAdornment';
 import TextField from '@mui/material/TextField';
 
 /** The largest input the in-browser FFmpeg can reliably handle (2 GiB). */
-export const MAX_FILE_BYTES = 2 * 1024 ** 3;
+const MAX_FILE_BYTES = 2 * 1024 ** 3;
 
 /** "song.final.wav" -> "song.final". Used as the default output filename. */
 const withoutExtension = (filename: string) =>
   filename.includes('.') ? filename.slice(0, filename.lastIndexOf('.')) : filename;
+
+/** An audio track's name in the track picker, e.g. "Stream 1 (aac) — eng, 48000 Hz, 5.1". */
+const trackLabel = (stream: StreamInfo) =>
+  `Stream ${stream.index}`
+  + (stream.codec ? ` (${stream.codec})` : '')
+  + (stream.details.length ? ` — ${stream.details.join(', ')}` : '');
 
 const Homepage = (): React.JSX.Element => {
   // ---------------------------------------------------------------------------
@@ -64,9 +70,9 @@ const Homepage = (): React.JSX.Element => {
   const [file, setFile] = useState<File | undefined>(undefined);
   // The output filename without its extension; the extension comes from the format.
   const [outputName, setOutputName] = useState('');
-  // The chosen audio track's stream index, or '' for the format's default. Track numbers
-  // only make sense for this file, so unlike the settings this isn't saved.
-  const [audioStream, setAudioStream] = useState('');
+  // The audio track the user picked, or null for the format's default (see audioTrack below).
+  // Track numbers only make sense for this file, so unlike the settings this isn't saved.
+  const [chosenTrack, setChosenTrack] = useState<AudioTrack | null>(null);
   const [isConverting, setIsConverting] = useState(false);
 
   // Manual mode: the user types everything after `ffmpeg -i <input>` themselves.
@@ -121,6 +127,16 @@ const Homepage = (): React.JSX.Element => {
   const inputFilename = file?.name ?? '';
   // The selected format's entry in formats.tsx: its label, extension, args, Panel and flags.
   const format = FORMATS[codec];
+  // The selected file's audio tracks, once ffprobe has read it.
+  const audioStreams = mediaInfo?.status === 'ready'
+    ? mediaInfo.info.streams.filter(stream => stream.type === 'audio') : [];
+  // Whether the output can hold every audio track (MKA, or when keeping the video).
+  const allowsAll = allowsAllAudioTracks(codec, settings);
+  // The audio track that will be converted: the user's choice, else all tracks for MKA and the
+  // first track for every other format. "All" falls back to the first track if the user then
+  // switches to a format that holds only one.
+  const audioTrack: AudioTrack = chosenTrack === 'all' && !allowsAll ? 0
+    : chosenTrack ?? (format.allAudioTracks ? 'all' : 0);
   // Change one setting, e.g. update('mp3Bitrate', '256'). It copies the settings object
   // rather than editing it, because React only notices a change when it gets a new object.
   const update: SetSetting = (key, value) => setSettings(previous => ({ ...previous, [key]: value }));
@@ -136,7 +152,7 @@ const Homepage = (): React.JSX.Element => {
     // Forget the previous file's information and track choice.
     probeToken.current = null;
     setMediaInfo(null);
-    setAudioStream('');
+    setChosenTrack(null);
     if (currentFile && currentFile.size > MAX_FILE_BYTES) {
       setFile(undefined);
       setAlert({ severity: 'error', message:
@@ -197,8 +213,7 @@ const Homepage = (): React.JSX.Element => {
     try {
       ({ ffmpegArgs, outputFilename } = manualMode
         ? manualCommandArgs(file.name, manualCommandInput)
-        : createFFmpegArgs(file.name, codec, settings, outputName.trim(),
-          audioStream === '' ? undefined : Number(audioStream)));
+        : createFFmpegArgs(file.name, codec, settings, outputName.trim(), audioTrack));
     } catch (error) {
       setAlert({ severity: 'error', message: (error as Error).message });
       return;
@@ -320,22 +335,16 @@ const Homepage = (): React.JSX.Element => {
               onChange={value => setCodec(value as Codec)}
               options={Object.entries(FORMATS).map(([value, { label }]) => [value, label] as const)} />
 
-            {/* Audio track picker. Shown once ffprobe has found at least one audio stream in the file. */}
-            {mediaInfo?.status === 'ready' && mediaInfo.info.streams.some(stream => stream.type === 'audio') && (
-              <SelectField id="audio_track" label="Audio track" value={audioStream} onChange={setAudioStream}
+            {/* Audio track picker. Shown when ffprobe has found more than one audio track.
+                Otherwise (or before ffprobe finishes, or if it fails) the default is used. */}
+            {audioStreams.length > 1 && (
+              <SelectField id="audio_track" label="Audio track" value={String(audioTrack)}
+                onChange={value => setChosenTrack(value === 'all' ? 'all' : Number(value))}
                 options={[
-                  // The first option keeps the format's default: all audio tracks for formats
-                  // with mapsAllAudio, otherwise the one track FFmpeg picks.
-                  ['', format.mapsAllAudio ? 'Default (all audio tracks)' : 'Automatic (one audio track)'],
-                  // Then one option per audio stream, e.g. "Stream 1 (aac) — eng, 48000 Hz, 5.1".
-                  ...mediaInfo.info.streams.filter(stream => stream.type === 'audio').map(stream => [
-                    String(stream.index),
-                    `Stream ${stream.index}${stream.codec ? ` (${stream.codec})` : ''}${stream.details.length ? ` — ${stream.details.join(', ')}` : ''}`,
-                  ] as const),
-                ]}
-                helperText={audioStream !== '' ? 'Only the selected audio track will be included.'
-                  : format.mapsAllAudio ? 'This format maps all audio tracks by default. Select one if the output container supports only one track.'
-                  : 'FFmpeg automatically selects one audio track. Choose a track to override it.'} />
+                  ...(allowsAll ? [['all', 'All audio tracks'] as const] : []),
+                  // The value is the track's position among the audio tracks (0 is the first): -map 0:a:<position>.
+                  ...audioStreams.map((stream, position) => [String(position), trackLabel(stream)] as const),
+                ]} />
             )}
             <Divider sx={{ my: 2 }} />
 
