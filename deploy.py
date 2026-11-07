@@ -1,46 +1,43 @@
 #!/usr/bin/env python3
-"""Update an existing production installation with python3 deploy.py."""
+"""Update the production server to the latest code: python3 deploy.py (or yarn deploy).
 
-from pathlib import Path
-import shlex
+Run it as your normal account (not root) on a server prepared by setup.sh. It stops at
+the first failing step; there is no automatic rollback, and active downloads are interrupted.
+"""
+import os
 import subprocess
 import sys
 
-ROOT = Path(__file__).resolve().parent
+COMPOSE = ['docker', 'compose', '-f', 'docker/prod/docker-compose.yml']
 
-
-def run(*command):
-    print(f'$ {shlex.join(command)}', flush=True)
-    subprocess.run(command, cwd=ROOT, check=True)
-
-
-def compose(*arguments):
-    run('docker', 'compose', '-f', 'docker/prod/docker-compose.yml', *arguments)
+STEPS = [
+    # Get the latest code. --ff-only refuses to create a merge commit on the server.
+    ['git', 'pull', '--ff-only'],
+    # Install exactly the versions in yarn.lock.
+    ['yarn', 'install', '--frozen-lockfile'],
+    # Build the backend images first: if this fails, the live website is left untouched.
+    # --pull also fetches newer versions of the images they're based on.
+    COMPOSE + ['build', '--pull'],
+    # Build the website into build/, which Nginx serves.
+    ['yarn', 'build'],
+    # Restart any container whose image or config changed, and wait until they're all running.
+    COMPOSE + ['up', '--detach', '--remove-orphans', '--wait', '--wait-timeout', '120'],
+    # Check the Nginx config, then reload it. Reloading also makes Nginx look up the
+    # restarted backend containers' new addresses. (-T: no terminal needed.)
+    COMPOSE + ['exec', '-T', 'nginx', 'nginx', '-t'],
+    COMPOSE + ['exec', '-T', 'nginx', 'nginx', '-s', 'reload'],
+]
 
 
 def main():
-    if not (ROOT / 'cookies.txt').is_file():
-        raise FileNotFoundError('cookies.txt must exist in the project root before deployment.')
-    compose('config', '--quiet')
-    run('yarn', 'install', '--frozen-lockfile', '--non-interactive')
-
-    # Build images first: a failed image build must not replace live frontend assets.
-    compose('build', '--pull')
-    run('yarn', 'build')
-
-    # Nginx starts its Compose dependencies, without starting the one-off Certbot service.
-    compose('up', '-d', '--remove-orphans', '--wait', '--wait-timeout', '120', 'nginx')
-    compose('exec', '-T', 'nginx', 'nginx', '-t')
-    # Refresh upstream addresses after backend containers are recreated.
-    compose('exec', '-T', 'nginx', 'nginx', '-s', 'reload')
-    print('Deployment commands completed.', flush=True)
+    # Run every command from the project root, wherever this script was started from.
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    for command in STEPS:
+        print('\n$', ' '.join(command), flush=True)
+        if subprocess.run(command).returncode != 0:
+            sys.exit('Deployment failed at the step above.')
+    print('\nDeployment complete.')
 
 
 if __name__ == '__main__':
-    try:
-        main()
-    except (OSError, subprocess.CalledProcessError) as exc:
-        print(f'Deployment failed: {exc}', file=sys.stderr)
-        sys.exit(1)
-    except KeyboardInterrupt:
-        sys.exit(130)
+    main()
