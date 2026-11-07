@@ -19,8 +19,30 @@ const ERROR_PATTERN = /error|invalid|unsupported|unknown|not found|no such|could
 const OUT_OF_MEMORY = /out of memory|allocation failed|Cannot enlarge memory|Aborted\(OOM\)|Invalid typed array length|Array buffer allocation/i;
 
 /** What to try after running out of memory. The converted file is held in memory until it's saved. */
-export const OUT_OF_MEMORY_ADVICE = 'The converted file is kept in memory until it\'s saved, so large outputs need a lot of it. '
-  + 'Try closing other tabs, or convert a shorter part of the file (e.g. in manual mode, -t 600 converts the first 10 minutes).';
+export const OUT_OF_MEMORY_ADVICE = 'The converted file has to fit in the browser\'s memory until it\'s saved. '
+  + 'Try converting a shorter part of the file (e.g. in manual mode, -t 600 converts the first 10 minutes), or closing other tabs.';
+
+/**
+ * Wait for an answer from FFmpeg's worker, but give up after a while. When the worker runs
+ * out of memory it dies without a word, and ffmpeg.wasm would then wait forever. Stopping the
+ * worker makes any other waiting request fail straight away, so clean-up can't hang either.
+ * Copying even several GB normally takes seconds, so two minutes is generous.
+ */
+const WORKER_TIMEOUT_MS = 120_000;
+const withTimeout = async <T>(ffmpeg: FFmpeg, request: Promise<T>): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error('FFmpeg stopped responding, most likely because it ran out of memory.'));
+      ffmpeg.terminate();
+    }, WORKER_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([request, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 /**
  * The multi-threaded core needs SharedArrayBuffer, which browsers only provide on
@@ -153,11 +175,12 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
     checkActive();
     if (exitCode !== 0) throw new Error(`FFmpeg exited with code ${exitCode}`);
     report({ stage: 'Preparing output' });
-    const fileData = await ffmpeg.readFile(outputFilename);
+    // Copying a large output out of the worker is where memory most often runs out.
+    const fileData = await withTimeout(ffmpeg, ffmpeg.readFile(outputFilename));
     checkActive();
     // readFile returned a copy, so free FFmpeg's before making a third copy for the download.
     // A large output would otherwise be held in memory three times at once.
-    await ffmpeg.deleteFile(outputFilename).catch(() => {});
+    await withTimeout(ffmpeg, ffmpeg.deleteFile(outputFilename)).catch(() => {});
     checkActive();
     const bytes = fileData as Uint8Array;
     // Blob only accepts views of a plain ArrayBuffer. slice() copies shared memory into one.
@@ -175,7 +198,7 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
       const message = error instanceof Error ? error.message : typeof error === 'string' ? error : undefined;
       const detail = firstError ?? message;
       if (OUT_OF_MEMORY.test(`${message} ${firstError}`)) {
-        onAlert('error', `The browser ran out of memory during the conversion. ${OUT_OF_MEMORY_ADVICE}`);
+        onAlert('error', `The browser ran out of memory for the converted file. ${OUT_OF_MEMORY_ADVICE}`);
       } else {
         onAlert('error', detail ? `An error occurred during conversion: ${detail}` : 'An error occurred during conversion.');
       }
