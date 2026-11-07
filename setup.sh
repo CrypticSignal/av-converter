@@ -1,262 +1,114 @@
 #!/bin/bash
+# First-time setup of an Ubuntu server. Run it from your normal account:
+#
+#   sudo bash setup.sh            # HTTPS for $DOMAIN, with a Let's Encrypt certificate
+#   sudo bash setup.sh --local    # HTTP only, e.g. to try it out on a local machine
+#
+# It is safe to run again. To update an existing server, use deploy.py instead.
 
+# Stop at the first failing command, unset variable or failing pipe.
 set -euo pipefail
 
 DOMAIN="av-converter.com"
-EMAIL="theaudiophile@outlook.com"
+EMAIL="theaudiophile@outlook.com"   # Let's Encrypt sends certificate expiry warnings here.
 
-# Package installation, firewall changes and cron files require root privileges.
-[[ $EUID -eq 0 ]] || { echo "Run with sudo bash setup.sh" >&2; exit 1; }
-# Detect the account invoking sudo; Ubuntu VPS images default to ubuntu.
-SETUP_USER="${SUDO_USER:-ubuntu}"
-if [[ "$SETUP_USER" == root ]] || ! id "$SETUP_USER" >/dev/null 2>&1; then
-  echo "Run setup via sudo from the account that will deploy the app." >&2
+# Print a step's description in green.
+log() { echo -e "\n\033[0;32m$*\033[0m"; }
+
+# Installing packages and changing the firewall need root, but the app is built as
+# your own account, so you can run deploy.py later without sudo.
+if [[ $EUID -ne 0 || -z "${SUDO_USER:-}" || "$SUDO_USER" == root ]]; then
+  echo "Run this with sudo from your normal account: sudo bash setup.sh" >&2
   exit 1
 fi
-SETUP_GROUP="$(id -gn "$SETUP_USER")"
+APP_USER="$SUDO_USER"
 
-# Resolve project-relative paths from this script, regardless of the caller's directory.
-cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+# Work from the project root, wherever the script was started from.
+cd "$(dirname "$0")"
 
-log() {
-  local green='\033[0;32m'
-  local reset='\033[0m'
-  echo -e "${green}$*${reset}"
-  echo
-}
-
-LOCAL_MODE=false
-for arg in "$@"; do
-  if [ "$arg" == "--local" ]; then
-    LOCAL_MODE=true
-  fi
-done
-
-# Update system packages safely
+# ---------------------------------------------------------------------------------------
 log "Updating system packages..."
-apt-get update -y
+# Never stop to ask questions (e.g. about changed config files).
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
 apt-get upgrade -y
+# curl downloads the Node.js installer; cron runs the boot-time firewall rules and certificate renewal.
+apt-get install -y curl cron iptables
 
-# -----------------------------------------------------------------------------------------------------------------------------
-# Docker installation and setup:
-
-log "Installing prerequisites for Docker..."
-# dnsutils supplies dig; iptables manages host rules; cron restores rules and renews TLS.
-apt-get install -y ca-certificates curl dnsutils iptables cron
-
-if ! command -v docker &> /dev/null; then
-  log "Installing Docker and Compose from Ubuntu packages..."
-  # Ubuntu packages support this VPS without adding a separate Docker repository.
+# ---------------------------------------------------------------------------------------
+log "Installing Docker..."
+# Skip if Docker is already installed (possibly from Docker's own packages, which would conflict).
+if ! command -v docker >/dev/null; then
   apt-get install -y docker.io docker-compose-v2
 fi
-# Fail early if Docker exists but the required Compose v2 plugin is unavailable.
-docker compose version
+systemctl enable --now docker cron
+# Let your account run docker commands. This applies from your next login.
+usermod -aG docker "$APP_USER"
 
-# Allow web traffic without removing SSH or Oracle's existing firewall rules.
-log "Allowing HTTP and HTTPS through the host firewall..."
-# -w waits for the firewall lock; -C avoids duplicate rules on repeated runs.
-# Insert missing rules first so Oracle's final INPUT reject does not block them.
+# ---------------------------------------------------------------------------------------
+log "Opening ports 80 and 443 in the firewall..."
+# Insert each rule at the top, so it comes before Oracle Cloud's final "reject everything" rule.
+# -C checks whether the rule already exists, so running setup again doesn't add duplicates.
+# -w waits if another program (such as Docker) is changing the firewall at the same moment.
 for port in 80 443; do
   iptables -w -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null ||
     iptables -w -I INPUT 1 -p tcp --dport "$port" -j ACCEPT
 done
-# Reapply only these IPv4 rules at boot, without saving Docker's dynamic chains.
-# The quoted heredoc writes the commands literally; cron runs them as root.
+# iptables rules are lost on reboot, so add them again at every boot.
 cat > /etc/cron.d/av-converter-firewall <<'EOF'
 @reboot root /usr/sbin/iptables -w -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || /usr/sbin/iptables -w -I INPUT 1 -p tcp --dport 80 -j ACCEPT
 @reboot root /usr/sbin/iptables -w -C INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || /usr/sbin/iptables -w -I INPUT 1 -p tcp --dport 443 -j ACCEPT
 EOF
-# Cron files must not be group/world-writable; enable cron now and at boot.
-chmod 644 /etc/cron.d/av-converter-firewall
-systemctl enable --now cron
-log "Also allow TCP 80/443 in Oracle Cloud, and point your domain at this VPS."
+log "Remember to also allow TCP ports 80 and 443 in your cloud provider's firewall (e.g. Oracle Cloud's security list)."
 
-# This Ubuntu setup already uses systemd for cron; use it for Docker too.
-log "Enabling and starting Docker service..."
-systemctl enable --now docker
-
-# Grant Docker access and verify it using the user's updated group membership.
-# newgrp opens a new shell; runuser applies the new groups to commands here
-# without interrupting setup or starting an interactive shell as root.
-log "Granting Docker access to $SETUP_USER..."
-usermod -aG docker "$SETUP_USER"
-runuser -u "$SETUP_USER" -- docker info >/dev/null
-
-# ------------------------------------------------------------------------------------------------------------------------------
-
+# ---------------------------------------------------------------------------------------
+log "Installing Node.js and Yarn..."
+# Ubuntu's own Node.js package is too old, so use NodeSource's.
 curl -fsSL https://deb.nodesource.com/setup_26.x | bash -
-log "Installing Node.js..."
 apt-get install -y nodejs
-
-log "Installing yarn..."
 npm install --global yarn
 
-# Repair generated files from previous root-run installs. Leave source and cookies alone.
-log "Preparing writable dependencies and build output for $SETUP_USER..."
+log "Building the website..."
+# Build as your account, not root, so later deploys can overwrite these files.
 mkdir -p node_modules build
-chown -R "$SETUP_USER:$SETUP_GROUP" node_modules build
-chmod -R u+rwX node_modules build
+chown -R "$APP_USER:" node_modules build
+runuser -u "$APP_USER" -- yarn install --frozen-lockfile
+runuser -u "$APP_USER" -- yarn build
 
-log "Installing dependencies..."
-# Build as the deployment account to avoid creating root-owned files again.
-# Use the committed dependency versions and fail instead of rewriting yarn.lock.
-runuser -u "$SETUP_USER" -- yarn install --frozen-lockfile --non-interactive
-
-log "Building the project..."
-runuser -u "$SETUP_USER" -- yarn build
-
-# Production requires this bind-mounted file, even for anonymous downloads.
-if [ ! -e cookies.txt ]; then
-  # An empty Netscape-format file permits anonymous downloads. Existing cookies stay untouched.
-  printf '# Netscape HTTP Cookie File\n' > cookies.txt
-  # Let the non-root downloader container read this new file; it contains no credentials.
-  chmod 644 cookies.txt
+# The downloader container needs this file. An empty one means anonymous downloads (see the README).
+if [[ ! -f cookies.txt ]]; then
+  echo "# Netscape HTTP Cookie File" > cookies.txt
+  chown "$APP_USER:" cookies.txt
 fi
 
-cd docker/prod || exit 1
+# ---------------------------------------------------------------------------------------
+cd docker/prod
 
-log "Stopping and removing any existing containers for this project..."
-docker compose down
-
-# If running this script with --local
-if [ "$LOCAL_MODE" = true ]; then
-  log "Running in local mode. Skipping SSL and creating HTTP-only Nginx config..."
-  
-  cat <<'EOL' > nginx.conf
-events {}
-
-http {
-    include mime.types;
-    # Shared per-IP request counters used by the logging endpoint below.
-    limit_req_zone $binary_remote_addr zone=visit_logging:10m rate=2r/s;
-    
-    server {
-        listen 80;
-        server_name localhost;
-
-        include /etc/nginx/locations.conf;
-    }
-}
-EOL
-
-  # Rebuild backend images so startup uses the current source, not a stale image.
-  docker compose up --detach --build
-  docker compose restart nginx
-
-else
-  # Initial nginx config
-  log "Creating initial nginx configuration for certbot..."
-  cat <<'EOL' > nginx.conf
-events {}
-
-http {
-    include mime.types;
-    # Shared per-IP request counters used by the logging endpoint below.
-    limit_req_zone $binary_remote_addr zone=visit_logging:10m rate=2r/s;
-    
-    server {
-        listen 80;
-        server_name DOMAIN_PLACEHOLDER;
-
-        # Serve certificate validation over HTTP, without requiring an HTTPS redirect.
-        location /.well-known/acme-challenge/ {
-            root /var/www/certbot;
-        }
-    }
-}
-EOL
-
-  sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" nginx.conf
-
-  log "Restarting Nginx to pick up initial config..."
-  # Rebuild backend images so startup uses the current source, not a stale image.
-  docker compose up --detach --build
-  docker compose restart nginx
-  log "Waiting 3 seconds to give Nginx time to fully start..."
-  # Give Nginx time to fully start
-  sleep 3
-
-  # Check if SSL certificates already exist
-  log "Checking for existing SSL certificate..."
-  if ! docker compose run --rm --entrypoint sh certbot -c "ls /etc/letsencrypt/live/$DOMAIN/fullchain.pem" >/dev/null 2>&1; then
-    log "No SSL certificate found."
-    
-    # Check DNS resolution before attempting certbot
-    log "Checking if $DOMAIN resolves to this server..."
-    RESOLVED_IP=$(dig +short "$DOMAIN" A | tail -1)
-    if [ -z "$RESOLVED_IP" ]; then
-      log "ERROR: $DOMAIN does not resolve to any IP address."
-      log "Please ensure your domain's DNS A record points to this server's IP address."
-      exit 1
-    fi
-    
-    log "Domain resolves to: $RESOLVED_IP"
-    log "Requesting new SSL certificate from Let's Encrypt..."
-    if docker compose run --rm certbot certonly --webroot --webroot-path /var/www/certbot/ --email "$EMAIL" -d "$DOMAIN" --agree-tos --no-eff-email; then
-      log "SSL certificate created successfully!"
-    else
-      log "ERROR: Failed to obtain SSL certificate. Check DNS and firewall settings."
-      exit 1
-    fi
-  else
-    log "SSL certificate already exists! Skipping Certbot generation."
-  fi
-
-  # Final nginx config
-  log "Creating final nginx configuration with SSL..."
-  cat <<'EOL' > nginx.conf
-events {}
-
-http {
-    include mime.types;
-    # Shared per-IP request counters used by the logging endpoint below.
-    limit_req_zone $binary_remote_addr zone=visit_logging:10m rate=2r/s;
-    
-    server {
-        listen 80;
-        server_name DOMAIN_PLACEHOLDER;
-
-        # Serve certificate validation over HTTP, without requiring an HTTPS redirect.
-        location /.well-known/acme-challenge/ {
-            root /var/www/certbot;
-        }
-
-        location / {
-            return 301 https://$host$request_uri;
-        }
-    }
-
-    server {
-        listen 443 ssl;
-        server_name DOMAIN_PLACEHOLDER;
-        ssl_certificate     /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem;
-        ssl_certificate_key /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/privkey.pem;
-
-        location /.well-known/acme-challenge/ {
-            root /var/www/certbot;
-        }
-
-        include /etc/nginx/locations.conf;
-    }
-}
-EOL
-
-  sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" nginx.conf
-
-  log "Validating and restarting nginx container..."
-  # Validate the new on-disk config in a disposable container before restarting Nginx.
-  docker compose run --rm --no-deps nginx nginx -t
-  docker compose restart nginx
-
-  log "Scheduling certificate renewal twice daily..."
-  # A root-only wrapper quotes the absolute script path safely, including spaces.
-  printf '#!/bin/bash\nexec /bin/bash %q\n' "$PWD/renew-cert.sh" > /usr/local/sbin/av-converter-renew
-  chmod 700 /usr/local/sbin/av-converter-renew
-  # Run at 03:15 and 15:15 in the server's timezone; append output to the renewal log.
-  echo '15 3,15 * * * root /usr/local/sbin/av-converter-renew >> /var/log/av-converter-certbot.log 2>&1' > /etc/cron.d/av-converter-certbot
-  # Permit cron to read the schedule without allowing other users to modify it.
-  chmod 644 /etc/cron.d/av-converter-certbot
+if [[ "${1:-}" == "--local" ]]; then
+  log "Starting the site over HTTP (local mode)..."
+  # NGINX_CONF picks the Nginx config file; see the nginx service in docker-compose.yml.
+  NGINX_CONF=nginx-http.conf docker compose up --detach --build --wait
+  log "Setup complete: http://localhost"
+  exit 0
 fi
 
-log "Setup complete."
-log "Reconnect SSH (or run 'newgrp docker') before running Docker as $SETUP_USER."
+# Let's Encrypt proves you own the domain by fetching a file from it over HTTP,
+# so the first certificate is requested while Nginx serves plain HTTP.
+if ! docker compose run --rm --entrypoint test certbot -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem"; then
+  log "Getting a TLS certificate for $DOMAIN (its DNS must already point at this server)..."
+  NGINX_CONF=nginx-http.conf docker compose up --detach --build --wait
+  docker compose run --rm certbot certonly --webroot --webroot-path /var/www/certbot \
+    --domain "$DOMAIN" --email "$EMAIL" --agree-tos --no-eff-email
+fi
+
+log "Starting the site over HTTPS..."
+# Recreates Nginx with the HTTPS config (nginx.conf).
+docker compose up --detach --build --wait
+
+log "Scheduling certificate renewal..."
+# Certificates last 90 days; certbot only renews them in their last 30, so running it twice a day is cheap.
+echo "15 3,15 * * * root /bin/bash \"$PWD/renew-cert.sh\" >> /var/log/av-converter-certbot.log 2>&1" \
+  > /etc/cron.d/av-converter-certbot
+
+log "Setup complete: https://$DOMAIN"
+log "Log out and back in before running docker commands as $APP_USER."

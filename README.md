@@ -20,6 +20,7 @@
   - [Without Docker](#without-docker)
 - [YouTube cookies](#youtube-cookies)
 - [Downloader limits](#downloader-limits)
+- [Production](#production)
 - [Tests](#tests)
 - [Code layout](#code-layout)
 
@@ -62,13 +63,31 @@ Open http://localhost:3000. Vite proxies download requests to http://127.0.0.1:8
 
 For private, access-controlled deployments, a Netscape-format cookie export can help with YouTube sign-in challenges. **Cookies are login credentials:** never commit them, expose them to visitors, or use a personal session on a public downloader. Sessions can expire or fail to authenticate.
 
-Without Docker, use `downloader/cookies.txt`. Each request gets a temporary copy so the original stays unchanged. Development Docker and non-Docker setups work anonymously when no cookie file is supplied.
+In production, put the file at `cookies.txt` in the project root; without Docker, use `downloader/cookies.txt`. Each request gets a temporary copy so the original stays unchanged. Without a cookie file, downloads are anonymous.
 
 ## Downloader limits
 
 Each IP address can run two downloads at once, and at most four run across the whole server; both limits are constants at the top of `downloader/server.py`. Downloads have no file-size limit, and live recordings have no duration limit. A download stops if free disk space drops below 1 GiB.
 
 A completed download is kept for up to ten minutes. Its link can be used once; the file is removed when that transfer ends, or when the link expires.
+
+## Production
+
+**First-time setup** of an Ubuntu server, from your normal account:
+
+```sh
+sudo bash setup.sh
+```
+
+It installs Docker and Node.js, opens ports 80 and 443, builds the site, gets a TLS certificate for the domain set at the top of `setup.sh`, and schedules certificate renewal (`docker/prod/renew-cert.sh`). The domain's DNS must already point at the server. Use `sudo bash setup.sh --local` for HTTP only, without a certificate.
+
+**Updates**: run `yarn deploy` (or `python3 deploy.py`). It pulls the latest code, rebuilds the backend images and the website, restarts what changed and reloads Nginx. Each step is commented in `deploy.py`. There is no automatic rollback, and active downloads are interrupted.
+
+Production requires `cookies.txt` in the project root (`setup.sh` creates an empty one). After replacing it, run:
+
+```sh
+docker compose -f docker/prod/docker-compose.yml up -d downloader
+```
 
 ## Tests
 
@@ -96,7 +115,8 @@ GitHub Actions runs both suites and the frontend build on every push to master a
 | `src/pages/Homepage.tsx` | The converter page. |
 | `src/pages/DownloadPage.tsx` | The video downloader page, which streams progress from the backend. |
 | `downloader/server.py` | The yt-dlp backend. |
-| `docker/prod/locations.conf` | Shared Nginx routes for HTTP-only and HTTPS deployments. |
+| `docker/prod/nginx.conf`, `nginx-http.conf` | Nginx for HTTPS, and HTTP only (local mode and first certificate). Both include `locations.conf`, the site's routes. |
+| `logging/index.ts` | Records page visits in Loki, viewable in Grafana at `/grafana/`. |
 | `@ffmpeg/core-mt`, `@ffmpeg/core` | The multi-threaded and single-threaded FFmpeg WebAssembly cores, which Vite bundles as content-hashed assets. Pages that aren't cross-origin isolated (no SharedArrayBuffer) fall back to the single-threaded core. |
 
 To add an output format, add its name to `Codec` and an entry to `FORMATS` in `src/formats.tsx`, then add a row to the table in `src/utils/createFFmpegArgs.test.ts`.

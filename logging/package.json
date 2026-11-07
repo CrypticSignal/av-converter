@@ -1,13 +1,13 @@
 {
   "name": "logging",
   "version": "1.0.0",
-  "license": "MIT", 
+  "type": "module",
+  "license": "MIT",
   "dependencies": {
     "express": "^5.2.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
-    "ts-node": "^10.9.2",
     "typescript": "^7.0.2"
   }
 }

@@ -5,12 +5,6 @@ services:
     restart: unless-stopped
     cpus: "2.0"
     mem_limit: 2g
-    environment:
-      # Bound expensive jobs across all visitors; the per-IP limit still applies.
-      DOWNLOAD_MAX_CONCURRENT: "4"
-      DOWNLOAD_STORAGE_DIR: /tmp/av-downloader
-      DOWNLOAD_MIN_FREE_BYTES: "1073741824"
-      DOWNLOAD_STORAGE_CHECK_SECONDS: "1"
     volumes:
       - type: bind
         source: ../../cookies.txt
@@ -28,7 +22,8 @@ services:
     volumes:
       - certbot_webroot_path:/var/www/certbot:ro
       - ssl_certificate:/etc/letsencrypt:ro
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      # setup.sh sets NGINX_CONF=nginx-http.conf for local mode and before a certificate exists.
+      - ./${NGINX_CONF:-nginx.conf}:/etc/nginx/nginx.conf:ro
       - ./locations.conf:/etc/nginx/locations.conf:ro
       - ../../build:/usr/share/nginx/html:ro
       - ../../public/game:/game:ro
@@ -37,12 +32,14 @@ services:
       - logging
       - grafana
 
+  # Only runs on demand (`docker compose run --rm certbot ...`), never with `docker compose up`.
   certbot:
     container_name: certbot
     image: certbot/certbot:latest
+    profiles: [certbot]
     volumes:
-      - certbot_webroot_path:/var/www/certbot:rw   
-      - ssl_certificate:/etc/letsencrypt:rw 
+      - certbot_webroot_path:/var/www/certbot:rw
+      - ssl_certificate:/etc/letsencrypt:rw
 
   logging:
     container_name: logging

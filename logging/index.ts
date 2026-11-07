@@ -15,49 +15,45 @@ app.set('trust proxy', 1);
 const shortString = (value: unknown, fallback: string, maxLength = 100): string =>
     typeof value === 'string' && value.trim() ? value.trim().slice(0, maxLength) : fallback;
 
-app.post('/logging/visit', async (req: Request, res: Response) => {
+app.post('/logging/visit', (req: Request, res: Response) => {
     // Cross-origin pages can only send JSON after a CORS preflight, which this service
     // never approves; their simple (non-JSON) requests are refused here.
     if (!req.is('application/json')) {
         res.sendStatus(415);
         return;
     }
-    try {
-        // The path comes from the browser, so only accept a short, absolute path.
-        const rawPath = req.body?.path;
-        const path = typeof rawPath === 'string' && rawPath.startsWith('/')
-            ? rawPath.slice(0, 200)
-            : 'Unknown';
+    // The path comes from the browser, so only accept a short, absolute path.
+    const rawPath = req.body?.path;
+    const path = typeof rawPath === 'string' && rawPath.startsWith('/')
+        ? rawPath.slice(0, 200)
+        : 'Unknown';
 
-        const logEntry = {
-            "Path": path,
-            "IP": req.ip || req.socket.remoteAddress,
-            "Device Model": shortString(req.body?.deviceModel, 'Unknown Device'),
-            "Device Platform": shortString(req.body?.devicePlatform, 'Unknown Platform'),
-            "User Agent": shortString(req.headers['user-agent'], 'Unknown', 500)
-        };
+    const logEntry = {
+        "Path": path,
+        "IP": req.ip || req.socket.remoteAddress,
+        "Device Model": shortString(req.body?.deviceModel, 'Unknown Device'),
+        "Device Platform": shortString(req.body?.devicePlatform, 'Unknown Platform'),
+        "User Agent": shortString(req.headers['user-agent'], 'Unknown', 500)
+    };
 
-        const lokiPayload = {
-            streams: [
-                {
-                    stream: { job: 'visits' },
-                    values: [
-                        [ (Date.now() * 1000000).toString(), JSON.stringify(logEntry) ]
-                    ]
-                }
-            ]
-        };
+    const lokiPayload = {
+        streams: [
+            {
+                stream: { job: 'visits' },
+                values: [
+                    [ (Date.now() * 1000000).toString(), JSON.stringify(logEntry) ]
+                ]
+            }
+        ]
+    };
 
-        fetch(LOKI_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(lokiPayload)
-        }).catch(err => console.error('Failed to push to Loki:', err));
-        
-        res.sendStatus(200)
-    } catch (error) {
-        res.sendStatus(200)
-    }
+    fetch(LOKI_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(lokiPayload)
+    }).catch(err => console.error('Failed to push to Loki:', err));
+    
+    res.sendStatus(200);
 });
 
 app.listen(PORT, () => {

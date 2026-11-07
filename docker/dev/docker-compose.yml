@@ -2,9 +2,6 @@ services:
   downloader:
     build: ../../downloader
     init: true
-    environment:
-      # Match production admission control while developing locally.
-      DOWNLOAD_MAX_CONCURRENT: "4"
     restart: unless-stopped
     develop:
       watch:
