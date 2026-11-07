@@ -1,4 +1,4 @@
-import { FORMATS, bitrateFor, type Codec, type FormatSettings } from '../formats';
+import { FORMATS, type Codec, type FormatSettings } from '../formats';
 
 const MP4_FAMILY = ['.mp4', '.mov'];
 
@@ -19,7 +19,7 @@ export const createFFmpegArgs = (
   audioStream?: number,
 ): { ffmpegArgs: string[]; outputFilename: string } => {
   const format = FORMATS[codec];
-  const args = format.args(settings, bitrateFor(codec, settings));
+  const args = format.args(settings);
   let extension = format.extension;
 
   if (format.keepVideo && settings.isKeepVideo) {

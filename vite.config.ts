@@ -1,7 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import type { ViteDevServer } from 'vite'
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -9,16 +8,15 @@ export default defineConfig({
     react(),
     tailwindcss(),
     {
+      // Serve the game at /game in development, as Nginx does in production.
       name: 'game-route',
-      configureServer(server: ViteDevServer) {
-        server.middlewares.use((req: any, res: any, next: any) => {
-          if (req.url === '/game') {
-            req.url = '/game/game.html';
-          }
+      configureServer(server) {
+        server.middlewares.use((req, _res, next) => {
+          if (req.url === '/game') req.url = '/game/game.html';
           next();
         });
-      }
-    }
+      },
+    },
   ],
   server: {
     proxy: {

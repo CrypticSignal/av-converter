@@ -1,5 +1,5 @@
 import type { FFFSType, FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { toBlobURL } from '@ffmpeg/util';
 // Both cores are bundled by Vite as content-hashed assets, so browsers can cache them for good.
 import singleThreadCoreURL from '@ffmpeg/core?url';
 import singleThreadWasmURL from '@ffmpeg/core/wasm?url';
@@ -75,10 +75,9 @@ export interface ConversionJob {
   onLog: (message: string) => void;
   /**
    * Receives the converted file's object URL after its download starts, so the page can
-   * offer it again. The receiver then owns the URL and must revoke it. Without this
-   * callback the URL is revoked straight after the download starts.
+   * offer it again. The receiver then owns the URL and must revoke it.
    */
-  onOutput?: (output: ConvertedFile) => void;
+  onOutput: (output: ConvertedFile) => void;
 }
 
 export interface ConvertedFile {
@@ -121,7 +120,6 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
   };
   let filesTouched = false;
   let inputMounted = false;
-  let inputWritten = false;
   const inputPath = `${INPUT_DIR}/${inputFilename}`;
   try {
     checkActive();
@@ -135,21 +133,12 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
     filesTouched = true;
     // Never allow a failed execution to download a previous conversion's output.
     await ffmpeg.deleteFile(outputFilename).catch(() => {});
-    checkActive();
-    // Mount the input read-only so it is read on demand rather than copied into
-    // memory; fall back to copying if this core lacks WORKERFS. Either way the
-    // input lives in its own directory, so an output may share its name.
+    // Mount the input read-only so it is read on demand rather than copied into memory.
+    // It lives in its own directory, so an output may share its name.
     await ffmpeg.createDir(INPUT_DIR).catch(() => {}); // Exists after an earlier conversion.
-    checkActive();
     inputMounted = await ffmpeg.mount(WORKERFS, { blobs: [{ name: inputFilename, data: file }] }, INPUT_DIR);
+    if (!inputMounted) throw new Error('Could not read the file.');
     checkActive();
-    if (!inputMounted) {
-      const input = await fetchFile(file);
-      checkActive();
-      inputWritten = true;
-      await ffmpeg.writeFile(inputPath, input);
-      checkActive();
-    }
     const args = ffmpegArgs.map((arg, i) => ffmpegArgs[i - 1] === '-i' && arg === inputFilename ? inputPath : arg);
     started = performance.now();
     report({ stage: 'Converting' });
@@ -165,12 +154,8 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
     const blobPart = bytes.buffer instanceof ArrayBuffer ? bytes as Uint8Array<ArrayBuffer> : bytes.slice();
     const blob = new Blob([blobPart]);
     const objectURL = URL.createObjectURL(blob);
-    try {
-      downloadFile(objectURL, outputFilename);
-    } finally {
-      if (onOutput) onOutput({ url: objectURL, filename: outputFilename, size: blob.size });
-      else setTimeout(() => URL.revokeObjectURL(objectURL), 100);
-    }
+    onOutput({ url: objectURL, filename: outputFilename, size: blob.size });
+    downloadFile(objectURL, outputFilename);
     onAlert('success', 'Done! The converted file should have started downloading.');
     report({ stage: 'Conversion complete' });
   } catch (error) {
@@ -183,15 +168,8 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
   } finally {
     ffmpeg.off('log', handleLog);
     ffmpeg.off('progress', handleProgress);
-    if (filesTouched && isActive()) {
-      // Missing files and a terminated worker are expected cleanup cases.
-      const cleanup = [() => ffmpeg.deleteFile(outputFilename)];
-      if (inputMounted) cleanup.push(() => ffmpeg.unmount(INPUT_DIR));
-      if (inputWritten) cleanup.push(() => ffmpeg.deleteFile(inputPath));
-      for (const step of cleanup) {
-        if (!isActive()) break;
-        try { await step(); } catch { /* best effort */ }
-      }
-    }
+    // Best effort: missing files and a terminated worker are expected here.
+    if (filesTouched && isActive()) await ffmpeg.deleteFile(outputFilename).catch(() => {});
+    if (inputMounted && isActive()) await ffmpeg.unmount(INPUT_DIR).catch(() => {});
   }
 };

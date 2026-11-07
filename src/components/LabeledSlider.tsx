@@ -7,9 +7,9 @@ export interface LabeledSliderProps {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  min: string | number;
-  max: string | number;
-  step: string | number;
+  min: number;
+  max: number;
+  step: number;
   /** Shown after the value, e.g. "kbps". */
   unit?: string;
 }
@@ -26,9 +26,9 @@ const LabeledSlider = ({ id, label, value, onChange, min, max, step, unit }: Lab
       </Typography>
       <Slider
         value={Number(value)}
-        min={Number(min)}
-        max={Number(max)}
-        step={Number(step)}
+        min={min}
+        max={max}
+        step={step}
         marks
         valueLabelDisplay="auto"
         valueLabelFormat={() => display}
