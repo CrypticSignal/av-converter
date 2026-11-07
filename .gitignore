@@ -3,4 +3,5 @@ node_modules
 __pycache__/
 .venv/
 cookies.txt
+downloader-password.env
 *-cookies.txt

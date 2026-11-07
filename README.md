@@ -15,11 +15,12 @@
 
 - [Audio/Video Converter](#audiovideo-converter)
 - [Video Downloader](#video-downloader)
+  - [YouTube cookies](#youtube-cookies)
+  - [Password](#password)
+  - [Limits](#limits)
 - [Run locally](#run-locally)
   - [With Docker](#with-docker)
   - [Without Docker](#without-docker)
-- [YouTube cookies](#youtube-cookies)
-- [Downloader limits](#downloader-limits)
 - [Production](#production)
 - [Tests](#tests)
 - [Code layout](#code-layout)
@@ -32,7 +33,32 @@ There's no limit on the input file's size: FFmpeg reads it directly from disk. T
 
 ## Video Downloader
 
-Click on Video Downloader in the navigation bar (or visit /download). This is essentially a [yt-dlp](https://github.com/yt-dlp/yt-dlp) wrapper.
+#### YouTube cookies
+
+If YouTube asks yt-dlp to sign in, export your YouTube cookies in Netscape format and save them as `cookies.txt` in the project root (`downloader/cookies.txt` without Docker). Without the file, downloads are anonymous. Cookies are login credentials, so never commit them, and expect to replace them when they expire.
+
+#### Password
+
+The video downloader (`/download`) is private: it isn't linked from the site, and every download needs its password.
+
+**How it works**: the password's SHA-256 hash is kept on the server, in `downloader-password.env` in the project root, and never committed. Docker Compose passes it to the downloader as the `DOWNLOADER_PASSWORD_SHA256` environment variable. The download page sends the password with each download request, and the downloader hashes it and compares it with the saved hash. If no hash is set, every download is refused.
+
+**To set or change the password**, run this on the server, from the project root:
+
+```sh
+python3 set_password.py
+```
+
+It asks for the new password, saves its hash, and restarts the downloader if it's running, so the new password applies straight away. `setup.sh` runs it the first time, and `deploy.py` stops if no password has been set.
+
+Locally, run `python3 set_password.py` too. The Docker setup picks the file up automatically; without Docker, start the backend with `env $(cat downloader-password.env) python downloader/server.py`.
+
+#### Limits
+
+There's no limit on how many downloads run at once. Downloads have no file-size limit, and live recordings have no duration limit. A download stops if free disk space drops below 1 GiB.
+
+A completed download is kept for up to ten minutes. Its link can be used once; the file is removed when that transfer ends, or when the link expires.
+
 ## Run locally
 
 #### With Docker
@@ -60,18 +86,6 @@ yarn dev
 ```
 
 Open http://localhost:3000. Vite proxies download requests to http://127.0.0.1:8000; set `DOWNLOADER_URL` to use another backend. Local downloads need the Vite development server, not the static preview server.
-
-## YouTube cookies
-
-For private, access-controlled deployments, a Netscape-format cookie export can help with YouTube sign-in challenges. **Cookies are login credentials:** never commit them, expose them to visitors, or use a personal session on a public downloader. Sessions can expire or fail to authenticate.
-
-In production, put the file at `cookies.txt` in the project root; without Docker, use `downloader/cookies.txt`. Each request gets a temporary copy so the original stays unchanged. Without a cookie file, downloads are anonymous.
-
-## Downloader limits
-
-Each IP address can run two downloads at once, and at most four run across the whole server; both limits are constants at the top of `downloader/server.py`. Downloads have no file-size limit, and live recordings have no duration limit. A download stops if free disk space drops below 1 GiB.
-
-A completed download is kept for up to ten minutes. Its link can be used once; the file is removed when that transfer ends, or when the link expires.
 
 ## Production
 
@@ -119,6 +133,7 @@ GitHub Actions runs both suites and the frontend build on every push to master a
 | `src/utils/manualCommand.ts` | Checks and builds the arguments for a manual FFmpeg command. |
 | `src/pages/DownloadPage.tsx` | The video downloader page, which streams progress from the backend. |
 | `downloader/server.py` | The yt-dlp backend. |
+| `set_password.py` | Sets the downloader's password, saving its hash in `downloader-password.env`. |
 | `docker/prod/nginx.conf`, `nginx-http.conf` | Nginx for HTTPS, and HTTP only (local mode and first certificate). Both include `locations.conf`, the site's routes. |
 | `logging/index.ts` | Records page visits in Loki, viewable in Grafana at `/grafana/`. |
 | `@ffmpeg/core-mt`, `@ffmpeg/core` | The multi-threaded and single-threaded FFmpeg WebAssembly cores, which Vite bundles as content-hashed assets. Pages that aren't cross-origin isolated (no SharedArrayBuffer) fall back to the single-threaded core. |

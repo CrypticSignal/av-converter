@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     cpus: "2.0"
     mem_limit: 2g
+    # DOWNLOADER_PASSWORD_SHA256, written by set_password.py.
+    env_file: ../../downloader-password.env
     volumes:
       - type: bind
         source: ../../cookies.txt

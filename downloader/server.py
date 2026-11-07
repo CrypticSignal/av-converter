@@ -1,6 +1,6 @@
 """Request-based yt-dlp downloads. Files exist only for the current request."""
-import ipaddress
-from collections import Counter
+import hashlib
+import hmac
 import json
 import logging
 import mimetypes
@@ -18,9 +18,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlsplit
 
 LOGGER = logging.getLogger(__name__)
-MAX_DOWNLOADS_PER_CLIENT = 2
-# Bound yt-dlp/FFmpeg CPU and memory use across all visitors.
-GLOBAL_DOWNLOAD_SLOTS = threading.BoundedSemaphore(4)
+# The downloader is private: every download needs the password with this SHA-256 hash.
+# set_password.py saves it in downloader-password.env, which Docker Compose passes in.
+PASSWORD_SHA256 = os.environ.get('DOWNLOADER_PASSWORD_SHA256', '').strip().lower()
 STORAGE_DIR = Path(tempfile.gettempdir()) / 'av-downloader'
 MIN_FREE_BYTES = 1024**3
 # Keep in sync with client_max_body_size in docker/prod/locations.conf.
@@ -47,28 +47,11 @@ class DownloadError(Exception):
     """A download failure with a message safe to display to the user."""
 
 
-class ClientDownloads:
-    """Count each client's simultaneous downloads, allowing at most MAX_DOWNLOADS_PER_CLIENT."""
-
-    def __init__(self):
-        self.active = Counter()
-        self.lock = threading.Lock()
-
-    def acquire(self, client):
-        with self.lock:
-            if self.active[client] >= MAX_DOWNLOADS_PER_CLIENT:
-                return False
-            self.active[client] += 1
-            return True
-
-    def release(self, client):
-        with self.lock:
-            self.active[client] -= 1
-            if not self.active[client]:
-                del self.active[client]
-
-
-CLIENT_DOWNLOADS = ClientDownloads()
+def check_password(password):
+    if not PASSWORD_SHA256:
+        return False
+    hashed = hashlib.sha256(password.encode()).hexdigest()
+    return hmac.compare_digest(hashed, PASSWORD_SHA256)
 
 
 class DownloadFiles:
@@ -242,29 +225,11 @@ def download_video(url, download_type, directory, on_output):
 
 
 class DownloadHandler(BaseHTTPRequestHandler):
-    def client_ip(self):
-        """The visitor's address: nginx's X-Real-IP when the request came through a local proxy.
-
-        Only private and loopback peers are trusted to set the header, so a client
-        that reaches this server directly cannot claim another address.
-        """
-        peer = self.client_address[0]
-        forwarded = self.headers.get('X-Real-IP', '').strip()
-        try:
-            peer_address = ipaddress.ip_address(peer)
-            if forwarded and (peer_address.is_private or peer_address.is_loopback):
-                return str(ipaddress.ip_address(forwarded))
-        except ValueError:
-            pass
-        return peer
-
-    def error(self, status, message, retry_after=None):
+    def error(self, status, message):
         body = json.dumps({'error': message}).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
-        if retry_after is not None:
-            self.send_header('Retry-After', str(retry_after))
         self.send_header('Cache-Control', 'no-store')
         self.end_headers()
         self.wfile.write(body)
@@ -317,6 +282,7 @@ class DownloadHandler(BaseHTTPRequestHandler):
             if not 0 < length <= MAX_REQUEST_BYTES:
                 raise ValueError('Request body is too large or missing.')
             fields = parse_qs(self.rfile.read(length).decode('utf-8'), max_num_fields=4)
+            password = fields.get('password', [''])[0]
             url = validate_url(fields.get('url', [''])[0].strip())
             download_type = fields.get('format', ['default'])[0]
             if download_type not in DOWNLOAD_TYPES:
@@ -324,21 +290,13 @@ class DownloadHandler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeError) as exc:
             self.error(400, str(exc))
             return
-        client = self.client_ip()
-        if not CLIENT_DOWNLOADS.acquire(client):
-            self.error(429, f'You already have {MAX_DOWNLOADS_PER_CLIENT} downloads in progress. '
-                            'Wait for one to finish, then try again.')
+        if not PASSWORD_SHA256:
+            self.error(503, 'No downloader password is set. Run set_password.py on the server.')
             return
-        # Reject rather than queue jobs when the server is full.
-        if not GLOBAL_DOWNLOAD_SLOTS.acquire(blocking=False):
-            CLIENT_DOWNLOADS.release(client)
-            self.error(503, 'The download service is busy. Please try again shortly.', retry_after=5)
+        if not check_password(password):
+            self.error(401, 'Incorrect password.')
             return
-        try:
-            self.download(url, download_type)
-        finally:
-            CLIENT_DOWNLOADS.release(client)
-            GLOBAL_DOWNLOAD_SLOTS.release()
+        self.download(url, download_type)
 
     def download(self, url, download_type):
         """Stream yt-dlp's progress to the browser, ending with a link to the file."""
@@ -386,4 +344,6 @@ class DownloadHandler(BaseHTTPRequestHandler):
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    if not PASSWORD_SHA256:
+        LOGGER.warning('DOWNLOADER_PASSWORD_SHA256 is not set, so every download will be refused.')
     ThreadingHTTPServer((os.environ.get('HOST', '127.0.0.1'), 8000), DownloadHandler).serve_forever()

@@ -81,6 +81,13 @@ if [[ ! -f cookies.txt ]]; then
   chown "$APP_USER:" cookies.txt
 fi
 
+# The downloader needs a password. Change it later with: python3 set_password.py
+if [[ ! -f downloader-password.env ]]; then
+  log "Choose a password for the video downloader..."
+  python3 set_password.py
+  chown "$APP_USER:" downloader-password.env
+fi
+
 # ---------------------------------------------------------------------------------------
 cd docker/prod
 
