@@ -29,7 +29,8 @@ DOWNLOAD_LINK_SECONDS = 10 * 60
 METADATA_TIMEOUT_SECONDS = 120
 PROGRESS_PREFIX = 'av-progress:'
 ALLOWED_DOMAINS = ('youtube.com', 'youtu.be', 'vimeo.com', 'tiktok.com')
-COOKIES_FILE = Path(__file__).with_name('cookies.txt')
+# Optional YouTube cookies: cookies.txt in the project root, or where the Compose files mount it.
+COOKIES_FILE = Path(os.environ.get('COOKIES_FILE') or Path(__file__).resolve().parent.parent / 'cookies.txt')
 YTDLP_ARGS = [
     sys.executable, '-m', 'yt_dlp', '--ignore-config', '--js-runtimes', 'node',
     '--no-playlist', '--no-cache-dir', '--socket-timeout', '20',

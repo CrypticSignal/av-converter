@@ -7,6 +7,11 @@ services:
     env_file:
       - path: ../../downloader-password.env
         required: false
+    environment:
+      COOKIES_FILE: /project/cookies.txt
+    # The project root, read-only, so an optional cookies.txt there is used if it exists.
+    volumes:
+      - ../..:/project:ro
     develop:
       watch:
         - action: rebuild

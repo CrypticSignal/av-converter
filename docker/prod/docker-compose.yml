@@ -7,6 +7,8 @@ services:
     mem_limit: 2g
     # DOWNLOADER_PASSWORD_SHA256, written by set_password.py.
     env_file: ../../downloader-password.env
+    environment:
+      COOKIES_FILE: /app/cookies.txt
     volumes:
       - type: bind
         source: ../../cookies.txt
