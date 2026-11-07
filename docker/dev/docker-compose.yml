@@ -3,6 +3,10 @@ services:
     build: ../../downloader
     init: true
     restart: unless-stopped
+    # Optional locally: without it, the downloader refuses every download.
+    env_file:
+      - path: ../../downloader-password.env
+        required: false
     develop:
       watch:
         - action: rebuild

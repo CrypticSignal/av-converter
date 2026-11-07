@@ -31,6 +31,7 @@ const DOWNLOAD_TYPES = [
 ];
 
 export default function DownloadPage() {
+  const [password, setPassword] = useState('');
   const [url, setUrl] = useState('');
   const [downloadType, setDownloadType] = useState('default');
   const [busy, setBusy] = useState(false);
@@ -67,7 +68,7 @@ export default function DownloadPage() {
     try {
       const response = await fetch('/api/download', {
         method: 'POST', signal: request.signal,
-        body: new URLSearchParams({ url: url.trim(), format: downloadType }),
+        body: new URLSearchParams({ password, url: url.trim(), format: downloadType }),
       });
       if (!active()) { await response.body?.cancel().catch(() => undefined); return; }
       if (!response.ok) {
@@ -132,6 +133,9 @@ export default function DownloadPage() {
   return (
     <Container maxWidth="sm" sx={{ py: 5 }}>
       <Box component="form" onSubmit={download} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <TextField name="password" label="Password" type="password" required fullWidth value={password}
+          disabled={busy} onChange={event => setPassword(event.target.value)}
+          slotProps={{ htmlInput: { autoComplete: 'current-password', maxLength: 1024 } }} />
         <TextField name="url" label="Video URL" type="url" required fullWidth value={url}
           disabled={busy} onChange={event => setUrl(event.target.value)}
           placeholder="https://www.youtube.com/watch?v=..." slotProps={{ htmlInput: { maxLength: 2048 } }} />
@@ -140,7 +144,7 @@ export default function DownloadPage() {
           helperText={DOWNLOAD_TYPES.find(type => type.value === downloadType)?.description}>
           {DOWNLOAD_TYPES.map(type => <MenuItem key={type.value} value={type.value}>{type.label}</MenuItem>)}
         </TextField>}
-        <Button type="submit" variant="contained" disabled={busy || !url.trim()}>
+        <Button type="submit" variant="contained" disabled={busy || !url.trim() || !password}>
           {busy ? 'Preparing download…' : 'Download'}
         </Button>
         {busy && <Button type="button" onClick={cancel}>Cancel</Button>}

@@ -32,6 +32,8 @@ STEPS = [
 def main():
     # Run every command from the project root, wherever this script was started from.
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    if not os.path.isfile('downloader-password.env'):
+        sys.exit('Set the video downloader password first: python3 set_password.py')
     for command in STEPS:
         print('\n$', ' '.join(command), flush=True)
         if subprocess.run(command).returncode != 0:

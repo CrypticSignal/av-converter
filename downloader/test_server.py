@@ -1,4 +1,5 @@
 """Offline checks of the downloader's inputs and outputs. yt-dlp is never run."""
+import hashlib
 from pathlib import Path
 import tempfile
 import unittest
@@ -46,6 +47,19 @@ class DownloadTests(unittest.TestCase):
         self.output.write_bytes(b'keep this file')
         with self.assertRaisesRegex(server.DownloadError, 'valid output file'):
             self.download()
+
+
+class PasswordTests(unittest.TestCase):
+    def test_check_password(self):
+        with patch.object(server, 'PASSWORD_SHA256', hashlib.sha256(b'secret').hexdigest()):
+            self.assertTrue(server.check_password('secret'))
+            for password in ('', 'wrong', 'secret '):
+                with self.subTest(password=password):
+                    self.assertFalse(server.check_password(password))
+
+    def test_no_password_set_refuses_everything(self):
+        with patch.object(server, 'PASSWORD_SHA256', ''):
+            self.assertFalse(server.check_password(''))
 
 
 class UrlTests(unittest.TestCase):
