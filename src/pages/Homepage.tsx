@@ -8,7 +8,8 @@
  */
 import React, { useState, useRef, useEffect } from 'react';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { convertFile, loadFFmpeg, type ConvertedFile } from '../utils/convertFile';
+import { convertFile, loadFFmpeg, OUT_OF_MEMORY_ADVICE, type ConvertedFile } from '../utils/convertFile';
+import { markConversionEnded, markConversionStarted, takeUnfinishedConversion } from '../utils/unfinishedConversion';
 import OperationStatus from '../components/OperationStatus';
 import type { OperationProgress } from '../utils/progress';
 import Button from '@mui/material/Button';
@@ -36,8 +37,11 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import InputAdornment from '@mui/material/InputAdornment';
 import TextField from '@mui/material/TextField';
 
-/** The largest input the in-browser FFmpeg can reliably handle (2 GiB). */
-const MAX_FILE_BYTES = 2 * 1024 ** 3;
+/**
+ * The device's RAM in GB, roughly: browsers round it to a power of two and cap it.
+ * Only Chrome and Edge report it (undefined elsewhere).
+ */
+const deviceMemoryGB = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
 
 /** "song.final.wav" -> "song.final". Used as the default output filename. */
 const withoutExtension = (filename: string) =>
@@ -117,6 +121,18 @@ const Homepage = (): React.JSX.Element => {
     return stopWorker;
   }, []);
 
+  // If the tab crashed during a conversion (almost always from running out of memory), say so
+  // when it's reloaded. Leaving the page normally clears the mark; see unfinishedConversion.ts.
+  useEffect(() => {
+    const crashedDuring = takeUnfinishedConversion();
+    if (crashedDuring) {
+      setAlert({ severity: 'error', message:
+        `The conversion of ${crashedDuring} stopped because the browser ran out of memory. ${OUT_OF_MEMORY_ADVICE}` });
+    }
+    window.addEventListener('pagehide', markConversionEnded);
+    return () => window.removeEventListener('pagehide', markConversionEnded);
+  }, []);
+
   // Remember the format and settings for next time, whenever they change.
   useEffect(() => saveSettings({ codec, settings }), [codec, settings]);
 
@@ -132,6 +148,10 @@ const Homepage = (): React.JSX.Element => {
     ? mediaInfo.info.streams.filter(stream => stream.type === 'audio') : [];
   // Whether the output can hold every audio track (MKA, or when keeping the video).
   const allowsAll = allowsAllAudioTracks(codec, settings);
+  // Keeping the video makes an output about as large as the input. The converted file is held
+  // in memory (about twice over at the peak), so warn when it's large for this device.
+  const largeForDevice = !manualMode && file !== undefined && Boolean(format.keepVideo && settings.isKeepVideo)
+    && deviceMemoryGB !== undefined && file.size > deviceMemoryGB * 1024 ** 3 / 4;
   // The audio track that will be converted: the user's choice, else all tracks for MKA and the
   // first track for every other format. "All" falls back to the first track if the user then
   // switches to a format that holds only one.
@@ -153,12 +173,6 @@ const Homepage = (): React.JSX.Element => {
     probeToken.current = null;
     setMediaInfo(null);
     setChosenTrack(null);
-    if (currentFile && currentFile.size > MAX_FILE_BYTES) {
-      setFile(undefined);
-      setAlert({ severity: 'error', message:
-        `${currentFile.name} is ${formatBytes(currentFile.size)}. The maximum file size is ${formatBytes(MAX_FILE_BYTES)}.` });
-      return;
-    }
     setFile(currentFile);
     if (!currentFile) return;
     setAlert(null);
@@ -185,6 +199,7 @@ const Homepage = (): React.JSX.Element => {
   /** Cancel the running conversion by stopping FFmpeg. A new instance is created on the next Convert. */
   const cancel = () => {
     stopWorker();
+    markConversionEnded();
     setIsConverting(false);
     setAlert({ severity: 'info', message: 'Conversion cancelled.' });
     setStatus({ stage: 'Cancelled' });
@@ -232,6 +247,7 @@ const Homepage = (): React.JSX.Element => {
     setLogs('');
     setOutput(null);
     setIsConverting(true);
+    markConversionStarted(file.name);
     // Run the conversion in the background. convertFile reports back through these callbacks.
     void convertFile(ffmpeg, {
       file,
@@ -253,6 +269,7 @@ const Homepage = (): React.JSX.Element => {
       },
     }).finally(() => {
       if (!isActive()) return;
+      markConversionEnded();
       session.current = null;
       setIsConverting(false);
     });
@@ -284,9 +301,6 @@ const Homepage = (): React.JSX.Element => {
         {/* File picker, and the file's duration and streams once ffprobe has read them. */}
         <FileInput onFile={onFile} filename={inputFilename} disabled={isConverting} />
         {mediaInfo && <MediaInfoPanel state={mediaInfo} />}
-        <Typography variant="caption" sx={{ display: 'block' }}>
-          Max file size: {formatBytes(MAX_FILE_BYTES)}
-        </Typography>
         <Divider sx={{ my: 2 }} />
 
         <FormControlLabel
@@ -411,6 +425,16 @@ const Homepage = (): React.JSX.Element => {
           </a>{' '}
           ({formatBytes(output.size)}).
         </Typography>
+      )}
+
+      {largeForDevice && !isConverting && (
+        <div className="w-full max-w-md mx-auto">
+          <Alert severity="warning" sx={{ my: 2 }}>
+            This file is large for this device's memory (about {deviceMemoryGB} GB). Keeping the video
+            makes the converted file about as large, and the browser may run out of memory while saving it.
+            Closing other tabs can help.
+          </Alert>
+        </div>
       )}
 
       {/* Hidden rather than removed during a conversion, so the page layout doesn't jump. */}
