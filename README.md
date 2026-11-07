@@ -110,13 +110,20 @@ GitHub Actions runs both suites and the frontend build on every push to master a
 | Path | What it does |
 | --- | --- |
 | `src/formats.tsx` | One entry per output format: its label, extension, FFmpeg arguments and settings panel. |
+| `src/components/` | Small shared form controls (select, slider, yes/no radio, file input) and the status panel. |
 | `src/utils/createFFmpegArgs.ts` | Combines a format's arguments with the shared options: keep the video, downmix to stereo. |
 | `src/utils/convertFile.ts` | Runs FFmpeg (WebAssembly) in the browser and downloads the result. |
 | `src/pages/Homepage.tsx` | The converter page. |
+| `src/utils/manualCommand.ts` | Checks and builds the arguments for a manual FFmpeg command. |
 | `src/pages/DownloadPage.tsx` | The video downloader page, which streams progress from the backend. |
 | `downloader/server.py` | The yt-dlp backend. |
 | `docker/prod/nginx.conf`, `nginx-http.conf` | Nginx for HTTPS, and HTTP only (local mode and first certificate). Both include `locations.conf`, the site's routes. |
 | `logging/index.ts` | Records page visits in Loki, viewable in Grafana at `/grafana/`. |
 | `@ffmpeg/core-mt`, `@ffmpeg/core` | The multi-threaded and single-threaded FFmpeg WebAssembly cores, which Vite bundles as content-hashed assets. Pages that aren't cross-origin isolated (no SharedArrayBuffer) fall back to the single-threaded core. |
 
-To add an output format, add its name to `Codec` and an entry to `FORMATS` in `src/formats.tsx`, then add a row to the table in `src/utils/createFFmpegArgs.test.ts`.
+To add an output format:
+
+1. Add its name to `Codec` in `src/formats.tsx`.
+2. Add any settings it needs to `FormatSettings` and `DEFAULT_SETTINGS` (prefixed with the format's name, e.g. `mp3Bitrate`).
+3. Add an entry to `FORMATS` with its label, extension, FFmpeg `args` and settings `Panel`.
+4. Add a row to the table in `src/utils/createFFmpegArgs.test.ts`.

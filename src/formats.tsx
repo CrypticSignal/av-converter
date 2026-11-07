@@ -1,190 +1,257 @@
+/**
+ * Every output format the converter offers. Each entry in FORMATS says how the format
+ * appears in the dropdown, which FFmpeg arguments it uses, and which settings it shows.
+ */
 import React from 'react';
-import BitrateSlider, { type BitrateSliderProps } from './components/BitrateSlider';
-import AC3 from './components/AC3';
-import DTS from './components/Dts';
-import FLAC from './components/Flac';
-import MP3EncodingTypeSelector from './components/MP3/EncodingTypeSelector';
-import NoSettingsApplicable from './components/NoSettingsApplicable';
-import Opus from './components/Opus';
-import VorbisEncodingType from './components/Vorbis/EncodingType';
-import WavBitDepthSelector from './components/WavBitDepthSelector';
+import LabeledSlider from './components/LabeledSlider';
+import SelectField from './components/SelectField';
+import SettingNote from './components/SettingNote';
 
 export type Codec = 'AAC' | 'AC3' | 'ALAC' | 'CAF' | 'DTS' | 'FLAC' | 'MKA' | 'MP3' | 'Opus' | 'Vorbis' | 'WAV';
 
+/**
+ * Every setting on the page, for all formats. Each format reads only its own
+ * (e.g. MP3 reads mp3Bitrate, mp3EncodingType and mp3VbrSetting). Values are strings
+ * because they come straight from form controls.
+ */
 export interface FormatSettings {
-  ac3Bitrate: string;
-  /** Bitrates the user chose, per format; formats fall back to their default. */
-  bitrates: Partial<Record<Codec, string>>;
-  downmixToStereo: boolean;
-  flacCompression: string;
+  // Shared by all formats; the homepage shows these controls itself.
   isKeepVideo: boolean;
+  downmixToStereo: boolean;
+
+  aacBitrate: string;
+  ac3Bitrate: string;
+  dtsBitrate: string;
+  flacCompression: string;
+  mp3Bitrate: string;
   mp3EncodingType: string;
   mp3VbrSetting: string;
+  opusBitrate: string;
   opusEncodingType: string;
-  qValue: string;
+  vorbisBitrate: string;
   vorbisEncodingType: string;
+  vorbisQuality: string;
   wavBitDepth: string;
 }
 
 export const DEFAULT_SETTINGS: FormatSettings = {
-  ac3Bitrate: '640',
-  bitrates: {},
-  downmixToStereo: false,
-  flacCompression: '5',
   isKeepVideo: false,
+  downmixToStereo: false,
+  aacBitrate: '192',
+  ac3Bitrate: '640',
+  dtsBitrate: '768',
+  flacCompression: '5',
+  mp3Bitrate: '192',
   mp3EncodingType: 'cbr',
   mp3VbrSetting: '0',
+  opusBitrate: '192',
   opusEncodingType: 'vbr',
-  qValue: '6',
+  vorbisBitrate: '192',
   vorbisEncodingType: 'abr',
+  vorbisQuality: '6',
   wavBitDepth: '16',
 };
 
-export type StringSetting = {
-  [K in keyof FormatSettings]: FormatSettings[K] extends string ? K : never
-}[keyof FormatSettings];
-
-interface PanelProps {
-  settings: FormatSettings;
-  onChange: (key: StringSetting) => (value: string) => void;
-  /** Present exactly for formats with a bitrate range. */
-  bitrate?: BitrateSliderProps;
-}
+/** Changes one setting, e.g. set('mp3Bitrate', '256'). */
+export type SetSetting = <K extends keyof FormatSettings>(key: K, value: FormatSettings[K]) => void;
 
 interface Format {
+  /** Shown in the "Desired format" dropdown. */
   label: string;
-  /** Output extension for an audio-only file. */
+  /** Extension of the output file when it's audio only. */
   extension: string;
-  bitrate?: { initial: string; min: string; max: string; step: string };
   /**
-   * Set when the format can be muxed alongside the input's copied video:
-   * 'mp4' keeps an MP4 or MOV input's container (other inputs get MKV), 'mkv' always uses MKV.
+   * Set when the format can keep the input's video alongside the new audio:
+   * 'mp4' keeps an MP4 or MOV input's container (other inputs become MKV); 'mkv' always uses MKV.
    */
   keepVideo?: 'mp4' | 'mkv';
-  /** Set when the audio is copied unchanged, so it cannot be downmixed to stereo. */
+  /** Set when the audio is copied unchanged, so it can't be downmixed to stereo. */
   copiesAudio?: true;
-  /** The default mapping keeps all audio streams rather than FFmpeg's choice of one. */
+  /** Set when the format keeps every audio track by default, rather than FFmpeg's choice of one. */
   mapsAllAudio?: true;
-  /** Audio arguments; `bitrate` is the slider value for formats with a bitrate range. */
-  args: (settings: FormatSettings, bitrate: string) => string[];
-  Panel: (props: PanelProps) => React.ReactNode;
+  /** The FFmpeg arguments that encode the audio. createFFmpegArgs adds the input, output and shared options. */
+  args: (settings: FormatSettings) => string[];
+  /** The format's controls, shown under "Encoder settings". */
+  Panel: (props: { settings: FormatSettings; set: SetSetting }) => React.ReactNode;
 }
+
+/** A bitrate slider, in kbps. */
+const BitrateSlider = ({ value, onChange, min, max, step }: {
+  value: string; onChange: (value: string) => void; min: number; max: number; step: number;
+}) => <LabeledSlider id="bitrate" label="Bitrate" unit="kbps" value={value} onChange={onChange} min={min} max={max} step={step} />;
+
+const MAX_6_CHANNELS = 'The maximum number of output channels is 6, so audio with more channels (such as 7.1 surround) will be downmixed to 5.1.';
+const BITRATE_NOTE = 'A higher bitrate allows for potentially higher audio quality, at the expense of a larger file size.';
+const NoSettings = () => <SettingNote>This format has no encoder settings.</SettingNote>;
 
 export const FORMATS: Record<Codec, Format> = {
   AAC: {
     label: 'AAC',
     extension: '.aac',
-    bitrate: { initial: '192', min: '32', max: '256', step: '32' },
     keepVideo: 'mp4',
-    args: (_, bitrate) => ['-c:a', 'aac', '-b:a', `${bitrate}k`],
-    Panel: ({ bitrate }) => <BitrateSlider {...bitrate!} />,
+    args: s => ['-c:a', 'aac', '-b:a', `${s.aacBitrate}k`],
+    Panel: ({ settings, set }) =>
+      <BitrateSlider value={settings.aacBitrate} onChange={v => set('aacBitrate', v)} min={32} max={256} step={32} />,
   },
+
   AC3: {
     label: 'AC3 (Dolby Digital)',
     extension: '.ac3',
     keepVideo: 'mp4',
-    args: ({ ac3Bitrate }) => ['-c:a', 'ac3', '-b:a', `${ac3Bitrate}k`],
-    Panel: ({ settings, onChange }) =>
-      <AC3 onAc3BitrateChange={onChange('ac3Bitrate')} ac3Bitrate={settings.ac3Bitrate} />,
+    args: s => ['-c:a', 'ac3', '-b:a', `${s.ac3Bitrate}k`],
+    Panel: ({ settings, set }) => <>
+      <SettingNote>{MAX_6_CHANNELS}</SettingNote>
+      <SelectField id="ac3_bitrate" label="Bitrate" value={settings.ac3Bitrate} onChange={v => set('ac3Bitrate', v)}
+        options={[['192', '192 kbps'], ['384', '384 kbps'], ['448', '448 kbps'], ['640', '640 kbps']]}
+        helperText={BITRATE_NOTE} />
+    </>,
   },
+
   ALAC: {
     label: 'ALAC (.m4a)',
     extension: '.m4a',
     keepVideo: 'mp4',
     args: () => ['-c:a', 'alac'],
-    Panel: () => <NoSettingsApplicable />,
+    Panel: NoSettings,
   },
+
   CAF: {
     label: 'CAF (.caf)',
     extension: '.caf',
     args: () => ['-c:a', 'alac'],
-    Panel: () => <NoSettingsApplicable />,
+    Panel: NoSettings,
   },
+
   DTS: {
     label: 'DTS (.dts)',
     extension: '.dts',
-    bitrate: { initial: '768', min: '384', max: '1536', step: '128' },
     keepVideo: 'mkv',
-    args: (_, bitrate) => ['-c:a', 'dca', '-b:a', `${bitrate}k`, '-strict', '-2'],
-    Panel: ({ bitrate }) => <DTS bitrate={bitrate!} />,
+    // FFmpeg's DTS encoder is marked experimental, so it needs -strict -2.
+    args: s => ['-c:a', 'dca', '-b:a', `${s.dtsBitrate}k`, '-strict', '-2'],
+    Panel: ({ settings, set }) => <>
+      <SettingNote>{MAX_6_CHANNELS}</SettingNote>
+      <BitrateSlider value={settings.dtsBitrate} onChange={v => set('dtsBitrate', v)} min={384} max={1536} step={128} />
+      <SettingNote>{BITRATE_NOTE}</SettingNote>
+    </>,
   },
+
   FLAC: {
-    mapsAllAudio: true,
     label: 'FLAC (.flac)',
     extension: '.flac',
     keepVideo: 'mkv',
-    // With the video, keep every stream (including subtitles); otherwise only the audio streams.
-    args: ({ isKeepVideo, flacCompression }) => [
-      ...(isKeepVideo ? ['-map', '0', '-c:s', 'copy'] : ['-map', '0:a']),
-      '-c:a', 'flac', '-compression_level', flacCompression,
-    ],
-    Panel: ({ settings, onChange }) =>
-      <FLAC onFlacCompressionChange={onChange('flacCompression')} flacCompression={settings.flacCompression} />,
-  },
-  MKA: {
     mapsAllAudio: true,
+    // With the video, keep every stream (including subtitles); otherwise only the audio streams.
+    args: s => [
+      ...(s.isKeepVideo ? ['-map', '0', '-c:s', 'copy'] : ['-map', '0:a']),
+      '-c:a', 'flac', '-compression_level', s.flacCompression,
+    ],
+    Panel: ({ settings, set }) => <>
+      <LabeledSlider id="flac_compression" label="Compression level" value={settings.flacCompression}
+        onChange={v => set('flacCompression', v)} min={0} max={12} step={1} />
+      <SettingNote>A higher value means a slightly smaller file size, but a longer conversion time.</SettingNote>
+    </>,
+  },
+
+  MKA: {
     label: 'MKA (.mka)',
     extension: '.mka',
     copiesAudio: true,
+    mapsAllAudio: true,
     args: () => ['-map', '0:a', '-c:a', 'copy'],
-    Panel: () => <NoSettingsApplicable />,
+    Panel: NoSettings,
   },
+
   MP3: {
     label: 'MP3 (.mp3)',
     extension: '.mp3',
-    bitrate: { initial: '192', min: '64', max: '320', step: '64' },
     keepVideo: 'mp4',
-    args: ({ mp3EncodingType, mp3VbrSetting }, bitrate) => ['-c:a', 'libmp3lame',
-      ...(mp3EncodingType === 'cbr' ? ['-b:a', `${bitrate}k`]
-        : mp3EncodingType === 'abr' ? ['-abr', '1', '-b:a', `${bitrate}k`]
-        : ['-q:a', mp3VbrSetting]),
-    ],
-    Panel: ({ settings, onChange, bitrate }) => (
-      <MP3EncodingTypeSelector
-        onEncodingTypeChange={onChange('mp3EncodingType')}
-        encodingType={settings.mp3EncodingType}
-        onVbrSettingChange={onChange('mp3VbrSetting')}
-        vbrSetting={settings.mp3VbrSetting}
-        bitrate={bitrate!}
-      />
-    ),
+    args: s => {
+      if (s.mp3EncodingType === 'vbr') return ['-c:a', 'libmp3lame', '-q:a', s.mp3VbrSetting];
+      if (s.mp3EncodingType === 'abr') return ['-c:a', 'libmp3lame', '-abr', '1', '-b:a', `${s.mp3Bitrate}k`];
+      return ['-c:a', 'libmp3lame', '-b:a', `${s.mp3Bitrate}k`]; // CBR
+    },
+    Panel: ({ settings, set }) => <>
+      <SelectField id="mp3_encoding_type" label="Encoding type" value={settings.mp3EncodingType}
+        onChange={v => set('mp3EncodingType', v)} options={[
+          ['cbr', 'CBR (Constant Bitrate)'],
+          ['abr', 'ABR (Average Bitrate)'],
+          ['vbr', 'VBR (Variable Bitrate)'],
+        ]} />
+      {settings.mp3EncodingType === 'vbr' ? (
+        <SelectField id="mp3_vbr_setting" label="VBR setting" value={settings.mp3VbrSetting}
+          onChange={v => set('mp3VbrSetting', v)}
+          options={[
+            ['0', '-V 0 (~240 kbps)'],
+            ['1', '-V 1 (~220 kbps)'],
+            ['2', '-V 2 (~190 kbps)'],
+            ['3', '-V 3 (~170 kbps)'],
+            ['4', '-V 4 (~160 kbps)'],
+            ['5', '-V 5 (~130 kbps)'],
+            ['6', '-V 6 (~120 kbps)'],
+          ]}
+          helperText={<>
+            For more details about the settings, see the{' '}
+            <a target="_blank" rel="noreferrer" className="underline"
+              href="https://wiki.hydrogenaud.io/index.php?title=LAME#Recommended_settings_details">
+              LAME recommended settings
+            </a>.
+          </>} />
+      ) : (
+        <BitrateSlider value={settings.mp3Bitrate} onChange={v => set('mp3Bitrate', v)} min={64} max={320} step={64} />
+      )}
+    </>,
   },
+
   Opus: {
     label: 'Opus (.opus)',
     extension: '.opus',
-    bitrate: { initial: '192', min: '16', max: '512', step: '16' },
-    args: ({ opusEncodingType }, bitrate) =>
-      ['-c:a', 'libopus', ...(opusEncodingType === 'cbr' ? ['-vbr', 'off'] : []), '-b:a', `${bitrate}k`],
-    Panel: ({ settings, onChange, bitrate }) => (
-      <Opus onOpusEncodingTypeChange={onChange('opusEncodingType')} encodingType={settings.opusEncodingType} bitrate={bitrate!} />
-    ),
+    args: s => ['-c:a', 'libopus', ...(s.opusEncodingType === 'cbr' ? ['-vbr', 'off'] : []), '-b:a', `${s.opusBitrate}k`],
+    Panel: ({ settings, set }) => <>
+      <SelectField id="opus_encoding_type" label="Encoding type" value={settings.opusEncodingType}
+        onChange={v => set('opusEncodingType', v)}
+        options={[['vbr', 'VBR (with a target bitrate)'], ['cbr', 'CBR (Constant Bitrate)']]} />
+      <BitrateSlider value={settings.opusBitrate} onChange={v => set('opusBitrate', v)} min={16} max={512} step={16} />
+      <SettingNote>
+        Opus supports at most 256 kbps per channel. For mono audio, choose 256 kbps or less, or the
+        conversion will fail.
+      </SettingNote>
+    </>,
   },
+
   Vorbis: {
-    mapsAllAudio: true,
     label: 'Vorbis (.ogg)',
     extension: '.ogg',
-    bitrate: { initial: '192', min: '32', max: '480', step: '32' },
-    args: ({ vorbisEncodingType, qValue }, bitrate) => ['-map', '0:a', '-c:a', 'libvorbis',
-      ...(vorbisEncodingType === 'abr' ? ['-b:a', `${bitrate}k`] : ['-q:a', qValue])],
-    Panel: ({ settings, onChange, bitrate }) => (
-      <VorbisEncodingType
-        onVorbisEncodingTypeChange={onChange('vorbisEncodingType')}
-        vorbisEncodingType={settings.vorbisEncodingType}
-        onQualitySliderMoved={onChange('qValue')}
-        qValue={settings.qValue}
-        bitrate={bitrate!}
-      />
-    ),
+    mapsAllAudio: true,
+    args: s => ['-map', '0:a', '-c:a', 'libvorbis',
+      ...(s.vorbisEncodingType === 'abr' ? ['-b:a', `${s.vorbisBitrate}k`] : ['-q:a', s.vorbisQuality])],
+    Panel: ({ settings, set }) => <>
+      <SelectField id="vorbis_encoding_type" label="Encoding type" value={settings.vorbisEncodingType}
+        onChange={v => set('vorbisEncodingType', v)}
+        options={[['abr', 'ABR (Average Bitrate)'], ['vbr', 'VBR (target a quality level)']]} />
+      {settings.vorbisEncodingType === 'abr' ? <>
+        <BitrateSlider value={settings.vorbisBitrate} onChange={v => set('vorbisBitrate', v)} min={32} max={480} step={32} />
+        <SettingNote>For mono audio, choose 224 kbps or less, or the conversion will fail.</SettingNote>
+      </> : <>
+        <LabeledSlider id="vorbis_quality" label="Quality" value={settings.vorbisQuality}
+          onChange={v => set('vorbisQuality', v)} min={0} max={10} step={1} />
+        <SettingNote>
+          Quality range is from 0 (lowest) to 10 (highest). For more details, see the{' '}
+          <a target="_blank" rel="noreferrer" className="underline"
+            href="https://wiki.hydrogenaud.io/index.php?title=Recommended_Ogg_Vorbis#Recommended_Encoder_Settings">
+            recommended encoder settings
+          </a>{' '}
+          and refer to the rows for -q 0 to -q 10.
+        </SettingNote>
+      </>}
+    </>,
   },
+
   WAV: {
     label: 'WAV (.wav)',
     extension: '.wav',
-    args: ({ wavBitDepth }) => ['-c:a', `pcm_s${wavBitDepth}le`],
-    Panel: ({ settings, onChange }) =>
-      <WavBitDepthSelector onBitDepthChange={onChange('wavBitDepth')} bitDepth={settings.wavBitDepth} />,
+    args: s => ['-c:a', `pcm_s${s.wavBitDepth}le`],
+    Panel: ({ settings, set }) =>
+      <SelectField id="wav_bit_depth" label="Output bit depth (audio)" value={settings.wavBitDepth}
+        onChange={v => set('wavBitDepth', v)} options={[['16', '16-bit'], ['24', '24-bit'], ['32', '32-bit']]} />,
   },
 };
-
-/** The bitrate slider's value for a format: the user's choice, else the format's default. */
-export const bitrateFor = (codec: Codec, settings: FormatSettings): string =>
-  settings.bitrates[codec] ?? FORMATS[codec].bitrate?.initial ?? '';
