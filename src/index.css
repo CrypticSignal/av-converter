@@ -1,1 +1,79 @@
 @import "tailwindcss";
+
+@theme {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html { color-scheme: dark; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: #070a13;
+  color: #e6e9f2;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Soft colour glows behind everything. */
+.app-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 10% -10%, rgba(139, 92, 246, 0.22), transparent 60%),
+    radial-gradient(50rem 35rem at 110% 10%, rgba(34, 211, 238, 0.14), transparent 60%),
+    radial-gradient(40rem 30rem at 50% 120%, rgba(99, 102, 241, 0.16), transparent 60%);
+}
+
+/* A faint grid over the glows. */
+.app-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at 50% 0%, black 30%, transparent 75%);
+}
+
+.gradient-text {
+  background-image: linear-gradient(120deg, #c4b5fd 0%, #818cf8 40%, #22d3ee 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.glass-card {
+  background: linear-gradient(180deg, rgba(20, 26, 46, 0.78), rgba(13, 17, 32, 0.78));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+@keyframes float-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+.float-in { animation: float-in 0.5s ease-out both; }
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.45); }
+  100% { box-shadow: 0 0 0 18px rgba(139, 92, 246, 0); }
+}
+.pulse-ring { animation: pulse-ring 1.6s ease-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .float-in, .pulse-ring { animation: none; }
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
