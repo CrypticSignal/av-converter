@@ -1,5 +1,6 @@
 """Request-based yt-dlp downloads. Files exist only for the current request."""
 import ipaddress
+from collections import Counter
 import json
 import logging
 import mimetypes
@@ -13,22 +14,18 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlsplit
 
 LOGGER = logging.getLogger(__name__)
 MAX_DOWNLOADS_PER_CLIENT = 2
-# Bound yt-dlp/FFmpeg CPU and memory use across all visitors, in addition to
-# per-IP fairness and the free-space reserve. Reject invalid limits at startup.
-MAX_CONCURRENT_DOWNLOADS = int(os.environ.get('DOWNLOAD_MAX_CONCURRENT', '4'))
-if MAX_CONCURRENT_DOWNLOADS <= 0:
-    raise ValueError('DOWNLOAD_MAX_CONCURRENT must be a positive integer.')
-GLOBAL_DOWNLOAD_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_DOWNLOADS)
-# Keep in sync with client_max_body_size in docker/prod/nginx.conf.
+# Bound yt-dlp/FFmpeg CPU and memory use across all visitors.
+GLOBAL_DOWNLOAD_SLOTS = threading.BoundedSemaphore(4)
+STORAGE_DIR = Path(tempfile.gettempdir()) / 'av-downloader'
+MIN_FREE_BYTES = 1024**3
+# Keep in sync with client_max_body_size in docker/prod/locations.conf.
 MAX_REQUEST_BYTES = 8 * 1024
 DOWNLOAD_LINK_SECONDS = 10 * 60
-HEARTBEAT_SECONDS = 5
 METADATA_TIMEOUT_SECONDS = 120
 PROGRESS_PREFIX = 'av-progress:'
 ALLOWED_DOMAINS = ('youtube.com', 'youtu.be', 'vimeo.com', 'tiktok.com')
@@ -50,31 +47,28 @@ class DownloadError(Exception):
     """A download failure with a message safe to display to the user."""
 
 
-class ClientLimits:
-    """Count each client's simultaneous downloads; there is no overall limit."""
+class ClientDownloads:
+    """Count each client's simultaneous downloads, allowing at most MAX_DOWNLOADS_PER_CLIENT."""
 
-    def __init__(self, limit):
-        self.limit = limit
-        self.active = {}
+    def __init__(self):
+        self.active = Counter()
         self.lock = threading.Lock()
 
     def acquire(self, client):
         with self.lock:
-            if self.active.get(client, 0) >= self.limit:
+            if self.active[client] >= MAX_DOWNLOADS_PER_CLIENT:
                 return False
-            self.active[client] = self.active.get(client, 0) + 1
+            self.active[client] += 1
             return True
 
     def release(self, client):
         with self.lock:
-            remaining = self.active.get(client, 0) - 1
-            if remaining > 0:
-                self.active[client] = remaining
-            else:
-                self.active.pop(client, None)
+            self.active[client] -= 1
+            if not self.active[client]:
+                del self.active[client]
 
 
-DOWNLOAD_SLOTS = ClientLimits(MAX_DOWNLOADS_PER_CLIENT)
+CLIENT_DOWNLOADS = ClientDownloads()
 
 
 class DownloadFiles:
@@ -111,129 +105,67 @@ class DownloadFiles:
 DOWNLOAD_FILES = DownloadFiles()
 
 
-class StorageGuard:
-    """Keep free disk space available, sharing one check per interval across jobs."""
-
-    def __init__(self):
-        self.root = Path(os.environ.get('DOWNLOAD_STORAGE_DIR',
-                         str(Path(tempfile.gettempdir()) / 'av-downloader')))
-        self.min_free = int(os.environ.get('DOWNLOAD_MIN_FREE_BYTES', 1024**3))
-        self.interval = float(os.environ.get('DOWNLOAD_STORAGE_CHECK_SECONDS', '1'))
-        if self.min_free < 0 or not 0 < self.interval <= 60:
-            raise ValueError('Invalid downloader storage limits.')
-        self.lock = threading.Lock()
-        self.measurement = None  # (measured at, bytes free)
-
-    def check(self):
-        with self.lock:
-            now = time.monotonic()
-            if self.measurement is None or now - self.measurement[0] >= self.interval:
-                self.root.mkdir(parents=True, exist_ok=True)
-                self.measurement = (now, shutil.disk_usage(self.root).free)
-            _, free = self.measurement
-        if free < self.min_free:
-            raise DownloadError('Downloader disk space is low. Please try again later.')
+def check_free_space():
+    if shutil.disk_usage(STORAGE_DIR).free < MIN_FREE_BYTES:
+        raise DownloadError('Downloader disk space is low. Please try again later.')
 
 
-STORAGE = StorageGuard()
+def run_download(args, on_output):
+    """Run yt-dlp, passing each output line to on_output.
 
+    While yt-dlp is silent, check free space and send a heartbeat each second, so a
+    disconnected client is noticed. yt-dlp and its FFmpeg children are always stopped.
+    """
+    process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               text=True, encoding='utf-8', errors='replace', start_new_session=True)
+    lines = queue.Queue()
 
-def stop_process(process):
-    """Stop yt-dlp and its FFmpeg children if streaming to the client fails."""
-    if os.name == 'nt':
-        if process.poll() is not None:
-            return
-        try:
-            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
-        finally:
-            if process.poll() is None:
-                process.kill()
-    else:
+    def read():
+        for line in process.stdout:
+            lines.put(line)
+        lines.put(None)
+
+    reader = threading.Thread(target=read)
+    reader.start()
+    try:
+        while True:
+            check_free_space()
+            try:
+                line = lines.get(timeout=1)
+            except queue.Empty:
+                on_output({'type': 'heartbeat'})
+                continue
+            if line is None:
+                break
+            on_output(line.rstrip())
+        if process.wait():
+            raise DownloadError('yt-dlp could not complete the download. See its output above for details.')
+    finally:
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-    process.wait()
+        process.wait()
+        reader.join()
+        process.stdout.close()
 
 
-def run_monitored(args, on_output, metadata=False):
-    """Drain both pipes while checking storage and the client even for silent jobs."""
-    options = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == 'nt' else {'start_new_session': True}
-    process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               text=True, encoding='utf-8', errors='replace', bufsize=1,
-                               **options)
-    messages = queue.Queue(maxsize=128)
-    finished = threading.Event()
-    readers = []
-    captured = []
-
-    def send(message):
-        """Queue a message, giving up once the main loop has finished."""
-        while not finished.is_set():
-            try:
-                messages.put(message, timeout=0.1)
-                return
-            except queue.Full:
-                pass
-
-    def read(pipe, source):
-        # Sends (source, line) per line, (None, exception) on a read error,
-        # and (source, None) when the pipe closes.
-        try:
-            while not finished.is_set():
-                line = pipe.readline(16384)
-                if not line:
-                    break
-                send((source, line))
-        except Exception as exc:
-            send((None, exc))
-        finally:
-            send((source, None))
-
-    started = time.monotonic()
-    heartbeat = started + HEARTBEAT_SECONDS
-    storage_check = started + STORAGE.interval
+def progress_event(line):
+    """Turn a yt-dlp progress line (see --progress-template) into an event, or None for other lines."""
+    if not line.startswith(PROGRESS_PREFIX):
+        return None
     try:
-        for source, pipe in (('stdout', process.stdout), ('stderr', process.stderr)):
-            thread = threading.Thread(target=read, args=(pipe, source), name='download-pipe')
-            thread.start()
-            readers.append(thread)
-        closed = 0
-        while closed < 2 or process.poll() is None:
-            now = time.monotonic()
-            if metadata and now - started >= METADATA_TIMEOUT_SECONDS:
-                raise DownloadError('Video information lookup timed out.')
-            if now >= storage_check:
-                STORAGE.check()
-                storage_check = now + STORAGE.interval
-            if now >= heartbeat:
-                on_output({'type': 'heartbeat'})
-                heartbeat = now + HEARTBEAT_SECONDS
-            try:
-                source, line = messages.get(timeout=0.05)
-            except queue.Empty:
-                continue
-            if source is None:
-                raise line
-            if line is None:
-                closed += 1
-            elif metadata and source == 'stdout':
-                captured.append(line)
-            else:
-                on_output(line.rstrip())
-        if process.wait():
-            raise DownloadError('yt-dlp could not complete the download. See its output above for details.')
-        return ''.join(captured)
-    finally:
-        finished.set()
-        try:
-            stop_process(process)
-        finally:
-            for thread in readers:
-                thread.join()
-            process.stdout.close()
-            process.stderr.close()
+        progress = json.loads(line[len(PROGRESS_PREFIX):])
+    except ValueError:
+        return None
+    if not isinstance(progress, dict):
+        return None
+    return {
+        'type': 'progress',
+        'stage': 'postprocess' if progress.get('postprocessor') else 'download',
+        **{key: progress.get(key) for key in (
+            'status', 'downloaded_bytes', 'total_bytes', 'total_bytes_estimate', 'speed', 'eta')},
+    }
 
 
 def validate_url(value):
@@ -252,7 +184,16 @@ def validate_url(value):
 
 
 def read_metadata(args, on_output):
-    return run_monitored(args, on_output, metadata=True)
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, encoding='utf-8', errors='replace',
+                                timeout=METADATA_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        raise DownloadError('Video information lookup timed out.') from None
+    for line in result.stderr.splitlines():
+        on_output(line)
+    if result.returncode:
+        raise DownloadError('yt-dlp could not read the video information. See its output above for details.')
+    return result.stdout
 
 
 def download_video(url, download_type, directory, on_output):
@@ -261,7 +202,7 @@ def download_video(url, download_type, directory, on_output):
     Output is streamed through on_output rather than stored in memory.
     Media downloads have no overall timeout; live recordings end with the source.
     """
-    STORAGE.check()
+    check_free_space()
     args = YTDLP_ARGS.copy()
     if COOKIES_FILE.is_file():
         # yt-dlp may update cookies. Keep the source read-only and isolate writers.
@@ -269,7 +210,7 @@ def download_video(url, download_type, directory, on_output):
         shutil.copyfile(COOKIES_FILE, cookies)
         args += ['--cookies', str(cookies)]
 
-    on_output({'type': 'stage', 'stage': 'metadata', 'message': 'Checking video information…'})
+    on_output({'type': 'stage', 'stage': 'metadata'})
     metadata = read_metadata(
         args + ['--dump-single-json', '--flat-playlist', '--playlist-items', '1', '--', url],
         on_output)
@@ -281,10 +222,10 @@ def download_video(url, download_type, directory, on_output):
     if info.get('_type') in ('playlist', 'multi_video') or 'entries' in info:
         raise DownloadError('Playlists are not supported. Paste a video URL.')
 
-    STORAGE.check()
+    check_free_space()
     manifest = directory / 'result.txt'
-    on_output({'type': 'stage', 'stage': 'download', 'message': 'Downloading media…'})
-    run_monitored(
+    on_output({'type': 'stage', 'stage': 'download'})
+    run_download(
         args + DOWNLOAD_TYPES[download_type] + [
             '--newline', '--progress', '--progress-delta', '1', '--no-colors',
             '--progress-template', 'download:' + PROGRESS_PREFIX + '%(progress)j',
@@ -292,7 +233,6 @@ def download_video(url, download_type, directory, on_output):
             '-P', str(directory),
             '--print-to-file', 'after_move:filepath', str(manifest), '--', url],
         on_output)
-    STORAGE.check()
     if not manifest.is_file():
         raise DownloadError('The download did not produce an output file.')
     output = Path(manifest.read_text(encoding='utf-8').strip()).resolve()
@@ -329,10 +269,10 @@ class DownloadHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def event(self, event_type, **data):
-        with self.event_lock:
-            self.wfile.write((json.dumps({'type': event_type, **data}, allow_nan=False) + '\n').encode())
-            self.wfile.flush()
+    def send_event(self, event):
+        """Send one line of the streamed response that DownloadPage.tsx reads."""
+        self.wfile.write((json.dumps(event, allow_nan=False) + '\n').encode())
+        self.wfile.flush()
 
     def do_GET(self):
         prefix = '/api/download/'
@@ -385,83 +325,65 @@ class DownloadHandler(BaseHTTPRequestHandler):
             self.error(400, str(exc))
             return
         client = self.client_ip()
-        if not DOWNLOAD_SLOTS.acquire(client):
+        if not CLIENT_DOWNLOADS.acquire(client):
             self.error(429, f'You already have {MAX_DOWNLOADS_PER_CLIENT} downloads in progress. '
                             'Wait for one to finish, then try again.')
             return
-
-        # Never queue an unbounded number of expensive jobs. Release the per-IP
-        # reservation if global admission fails, and release both in finally for
-        # every admitted job (success, cancellation, storage breach, or failure).
+        # Reject rather than queue jobs when the server is full.
         if not GLOBAL_DOWNLOAD_SLOTS.acquire(blocking=False):
-            DOWNLOAD_SLOTS.release(client)
+            CLIENT_DOWNLOADS.release(client)
             self.error(503, 'The download service is busy. Please try again shortly.', retry_after=5)
             return
-
-        temporary = None
-        self.event_lock = threading.Lock()
-        token = None
-        response_started = False
         try:
-            STORAGE.check()
-            temporary = tempfile.TemporaryDirectory(prefix='av-download-', dir=STORAGE.root)
-            response_started = True
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/x-ndjson')
-            self.send_header('Cache-Control', 'no-store')
-            self.send_header('X-Accel-Buffering', 'no')
-            self.end_headers()
+            self.download(url, download_type)
+        finally:
+            CLIENT_DOWNLOADS.release(client)
+            GLOBAL_DOWNLOAD_SLOTS.release()
 
-            def on_output(line):
-                if isinstance(line, dict):
-                    self.event(line['type'], **{key: value for key, value in line.items() if key != 'type'})
-                    return
-                if line.startswith(PROGRESS_PREFIX):
-                    try:
-                        progress = json.loads(line[len(PROGRESS_PREFIX):])
-                        if not isinstance(progress, dict):
-                            raise ValueError()
-                        stage = 'postprocess' if progress.get('postprocessor') else 'download'
-                        self.event('progress', stage=stage, **{
-                            key: progress.get(key) for key in (
-                                'status', 'downloaded_bytes', 'total_bytes',
-                                'total_bytes_estimate', 'speed', 'eta', 'fragment_index', 'fragment_count')})
-                        return
-                    except (ValueError, TypeError):
-                        pass
-                LOGGER.info('%s', line)
-                self.event('log', message=line)
+    def download(self, url, download_type):
+        """Stream yt-dlp's progress to the browser, ending with a link to the file."""
+        try:
+            check_free_space()
+        except DownloadError as exc:
+            self.error(507, str(exc))
+            return
+        temporary = tempfile.TemporaryDirectory(prefix='av-download-', dir=STORAGE_DIR)
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/x-ndjson')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-Accel-Buffering', 'no')  # Tell Nginx to pass each line on immediately.
+        self.end_headers()
 
+        def on_output(output):
+            """Send an event dict as is, and a line of yt-dlp output as progress or a log message."""
+            if isinstance(output, str):
+                event = progress_event(output)
+                if event is None:
+                    LOGGER.info('%s', output)
+                    event = {'type': 'log', 'message': output}
+                output = event
+            self.send_event(output)
+
+        try:
             output = download_video(url, download_type, Path(temporary.name), on_output)
-            STORAGE.check()
+            # From here on, DOWNLOAD_FILES deletes the files once they're downloaded or the link expires.
             token = DOWNLOAD_FILES.add(temporary, output)
-            self.event('ready', url=f'/api/download/{token}', filename=output.name)
+            temporary = None
+            self.send_event({'type': 'ready', 'url': f'/api/download/{token}', 'filename': output.name})
         except ConnectionError:
             LOGGER.info('Client disconnected from a download.')
-            if token:
-                DOWNLOAD_FILES.discard(token)
         except Exception as exc:
             LOGGER.exception('Download request failed')
-            if token:
-                DOWNLOAD_FILES.discard(token)
             message = str(exc) if isinstance(exc, DownloadError) else 'Unable to download this video. Check the output for details.'
             try:
-                if response_started:
-                    self.event('error', message=message)
-                else:
-                    self.error(507 if isinstance(exc, DownloadError) else 500, message)
+                self.send_event({'type': 'error', 'message': message})
             except ConnectionError:
                 pass
         finally:
-            try:
-                if temporary and not token:
-                    temporary.cleanup()
-            finally:
-                # File cleanup errors must not permanently reduce admission capacity.
-                DOWNLOAD_SLOTS.release(client)
-                GLOBAL_DOWNLOAD_SLOTS.release()
-
+            if temporary:
+                temporary.cleanup()
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
+    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     ThreadingHTTPServer((os.environ.get('HOST', '127.0.0.1'), 8000), DownloadHandler).serve_forever()
