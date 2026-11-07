@@ -53,18 +53,31 @@ const FileInput: React.FC<FileInputProps> = ({ onFile, filename, disabled = fals
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
       }}
       onDrop={onDrop}
-      className={`w-full max-w-md mx-auto my-4 p-6 border-2 border-dashed rounded-lg transition-colors ${
-        dragging ? "border-sky-500 bg-sky-50" : "border-gray-300"}`}
+      className={`group relative w-full px-6 py-10 border-2 border-dashed rounded-2xl transition-all duration-200 ${
+        dragging
+          ? "border-violet-400 bg-violet-500/10 scale-[1.01] shadow-[0_0_40px_-10px_rgba(139,92,246,0.7)]"
+          : "border-white/15 bg-white/[0.02] hover:border-violet-400/60 hover:bg-white/[0.04]"}`}
     >
+      <div className={`mx-auto mb-4 grid place-items-center h-14 w-14 rounded-2xl bg-gradient-to-br from-violet-500/25 to-cyan-400/20 ring-1 ring-white/10 transition-transform duration-200 group-hover:-translate-y-0.5 ${dragging ? "pulse-ring" : ""}`}>
+        {filename ? (
+          <svg viewBox="0 0 24 24" className="h-7 w-7 text-cyan-300" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" className="h-7 w-7 text-violet-300" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 16V4M6 10l6-6 6 6" /><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" />
+          </svg>
+        )}
+      </div>
       <Button
         disabled={disabled}
         component="label"
         role={undefined}
         variant="contained"
         tabIndex={-1}
-        sx={{ marginBottom: "0.25rem" }}
+        sx={{ maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block" }}
       >
-        {filename || "Select file"}
+        {filename || "Choose a file"}
         <VisuallyHiddenInput
           disabled={disabled}
           accept={ACCEPT}
@@ -76,7 +89,9 @@ const FileInput: React.FC<FileInputProps> = ({ onFile, filename, disabled = fals
           }}
         />
       </Button>
-      <p className="text-sm text-gray-500 mt-2">{dragging ? "Drop to select this file" : "or drag and drop a file here"}</p>
+      <p className="text-sm text-slate-400 mt-3">
+        {dragging ? "Drop to select this file" : filename ? "Click to choose another file, or drop one here" : "or drag and drop any audio or video file here"}
+      </p>
     </div>
   );
 };

@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Navbar from '../components/Navbar';
-import { Container } from '@mui/material';
 import { logVisit } from '../utils/logVisit';
 
 const RootLayout: React.FC = () => {
@@ -18,11 +17,10 @@ const RootLayout: React.FC = () => {
 
   return (
     <>
+      <div className="app-backdrop" aria-hidden="true" />
       <Navbar />
-      <main className="text-center">
-        <Container maxWidth={false} disableGutters>
-          <Outlet />
-        </Container>
+      <main className="text-center px-4 pb-16">
+        <Outlet />
       </main>
     </>
   );

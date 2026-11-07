@@ -31,7 +31,6 @@ import webAssemblyLogo from '../images/webassembly-25.png';
 // Material UI
 import Alert, { AlertColor } from '@mui/material/Alert';
 import Typography from '@mui/material/Typography';
-import Divider from '@mui/material/Divider';
 import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import InputAdornment from '@mui/material/InputAdornment';
@@ -52,6 +51,19 @@ const trackLabel = (stream: StreamInfo) =>
   `Stream ${stream.index}`
   + (stream.codec ? ` (${stream.codec})` : '')
   + (stream.details.length ? ` — ${stream.details.join(', ')}` : '');
+
+/** A numbered step in the converter card. */
+const Step = ({ n, title, children }: { n: number; title: string; children: React.ReactNode }) => (
+  <section className="py-6 first:pt-0 border-b border-white/[0.06] last:border-b-0">
+    <h2 className="flex items-center gap-3 mb-4 text-left text-base font-semibold text-slate-100">
+      <span className="grid place-items-center h-7 w-7 shrink-0 rounded-full text-xs font-bold text-white bg-gradient-to-br from-violet-500 to-cyan-500 shadow-md shadow-violet-500/30">
+        {n}
+      </span>
+      {title}
+    </h2>
+    {children}
+  </section>
+);
 
 const Homepage = (): React.JSX.Element => {
   // ---------------------------------------------------------------------------
@@ -282,169 +294,187 @@ const Homepage = (): React.JSX.Element => {
   // What's shown on the page.
   // ---------------------------------------------------------------------------
   return (
-    <>
+    <div className="max-w-2xl mx-auto">
       {/* Page header. */}
-      <div className="bg-black text-white text-center">
-        <h1 className="text-4xl font-sans mt-0 mb-0 pt-5 pb-1">Audio / Video Converter</h1>
-        <div className="text-sm mb-5 flex items-center justify-center">
-          <i className="mr-1">Powered by FFmpeg</i>
-          <a href="https://ffmpeg.org/" target="_blank" rel="noreferrer" className="inline-block align-middle mr-1">
-            <img src={ffmpegLogo} alt="ffmpeg logo" className="h-6 w-6" />
+      <header className="pt-12 pb-10 sm:pt-16">
+        <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight">
+          <span className="gradient-text">Audio / Video</span> Converter
+        </h1>
+        <p className="mt-4 text-slate-400 max-w-lg mx-auto">
+          Convert audio and video right in your browser. Fast, private, and nothing is uploaded.
+        </p>
+        <div className="mt-5 flex items-center justify-center gap-2 text-xs">
+          <a href="https://ffmpeg.org/" target="_blank" rel="noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/5 ring-1 ring-white/10 text-slate-300 hover:bg-white/10 transition-colors">
+            <img src={ffmpegLogo} alt="" className="h-4 w-4" /> Powered by FFmpeg
           </a>
-          <i className="mr-1">and WebAssembly</i>
-          <a href="https://webassembly.org/" target="_blank" rel="noreferrer" className="inline-block align-middle">
-            <img src={webAssemblyLogo} alt="web assembly logo" className="h-6 w-6" />
+          <a href="https://webassembly.org/" target="_blank" rel="noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/5 ring-1 ring-white/10 text-slate-300 hover:bg-white/10 transition-colors">
+            <img src={webAssemblyLogo} alt="" className="h-4 w-4" /> WebAssembly
           </a>
         </div>
-      </div>
+      </header>
 
-      {/* All the inputs. A disabled <fieldset> disables every control inside it, so nothing can
-          change during a conversion. Status and Cancel are outside it, so Cancel stays usable. */}
-      <fieldset disabled={isConverting} aria-label="Conversion settings" className="border-0 m-0 p-0 min-w-0">
-        {/* File picker, and the file's duration and streams once ffprobe has read them. */}
-        <FileInput onFile={onFile} filename={inputFilename} disabled={isConverting} />
-        {mediaInfo && <MediaInfoPanel state={mediaInfo} />}
-        <Divider sx={{ my: 2 }} />
+      <div className="glass-card float-in rounded-3xl p-5 sm:p-8">
+        {/* All the inputs. A disabled <fieldset> disables every control inside it, so nothing can
+            change during a conversion. Status and Cancel are outside it, so Cancel stays usable. */}
+        <fieldset disabled={isConverting} aria-label="Conversion settings" className="border-0 m-0 p-0 min-w-0">
+          {/* File picker, and the file's duration and streams once ffprobe has read them. */}
+          <Step n={1} title="Choose a file">
+            <FileInput onFile={onFile} filename={inputFilename} disabled={isConverting} />
+            {mediaInfo && <MediaInfoPanel state={mediaInfo} />}
+            <div className="mt-3 text-left">
+              <FormControlLabel
+                control={<Checkbox size="small" checked={manualMode} onChange={(_, checked) => setManualMode(checked)} />}
+                label={<span className="text-sm text-slate-300">Write my own FFmpeg command</span>}
+              />
+            </div>
+          </Step>
 
-        <FormControlLabel
-          control={<Checkbox checked={manualMode} onChange={(_, checked) => setManualMode(checked)} />}
-          label="Manual FFmpeg Command"
-        />
+          {manualMode ? (
+            // Manual mode: one text box for the rest of the command. The fixed start,
+            // "ffmpeg -i <input>", is shown in front of it.
+            <Step n={2} title="Enter FFmpeg command">
+              <TextField
+                id="manual_command"
+                label="Rest of the command"
+                value={manualCommandInput}
+                onChange={e => setManualCommandInput(e.target.value)}
+                placeholder="-c:v libx264 output.mp4"
+                helperText={<>Enter everything after the input, ending with the output filename (e.g. <code>-c:v libx264 output.mp4</code>).</>}
+                fullWidth
+                autoComplete="off"
+                slotProps={{
+                  inputLabel: { shrink: true },
+                  htmlInput: { style: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' } },
+                  input: {
+                    startAdornment: (
+                      <InputAdornment position="start" title={`ffmpeg -i ${inputFilename || 'input.mp4'}`}
+                        sx={{ maxWidth: '50%', flexShrink: 0, overflow: 'hidden', fontFamily: 'monospace' }}>
+                        <span className="block whitespace-nowrap overflow-hidden text-ellipsis font-mono text-violet-300">
+                          ffmpeg -i {inputFilename || 'input.mp4'}
+                        </span>
+                      </InputAdornment>
+                    ),
+                  },
+                }}
+              />
+            </Step>
+          ) : (
+            // Normal mode: choose a format and its settings.
+            <>
+              <Step n={2} title="Pick a format">
+                {/* "Desired format" dropdown, with one option per entry in FORMATS, e.g. ['MP3', 'MP3 (.mp3)']. */}
+                <SelectField id="codecs" label="Desired format" value={codec}
+                  onChange={value => setCodec(value as Codec)}
+                  options={Object.entries(FORMATS).map(([value, { label }]) => [value, label] as const)} />
 
-        <Divider sx={{ my: 2 }} />
+                {/* Audio track picker. Shown when ffprobe has found more than one audio track.
+                    Otherwise (or before ffprobe finishes, or if it fails) the default is used. */}
+                {audioStreams.length > 1 && (
+                  <SelectField id="audio_track" label="Audio track" value={String(audioTrack)}
+                    onChange={value => setChosenTrack(value === 'all' ? 'all' : Number(value))}
+                    options={[
+                      ...(allowsAll ? [['all', 'All audio tracks'] as const] : []),
+                      // The value is the track's position among the audio tracks (0 is the first): -map 0:a:<position>.
+                      ...audioStreams.map((stream, position) => [String(position), trackLabel(stream)] as const),
+                    ]} />
+                )}
+              </Step>
 
-        {manualMode ? (
-          // Manual mode: one text box for the rest of the command. The fixed start,
-          // "ffmpeg -i <input>", is shown in front of it.
-          <div className="my-4 w-full max-w-xl mx-auto px-4">
-            <Typography variant="h5" component="h2" gutterBottom>
-              Enter FFmpeg Command
-            </Typography>
-            <TextField
-              id="manual_command"
-              label="Rest of the command"
-              value={manualCommandInput}
-              onChange={e => setManualCommandInput(e.target.value)}
-              placeholder="-c:v libx264 output.mp4"
-              helperText={<>Enter everything after the input, ending with the output filename (e.g. <code>-c:v libx264 output.mp4</code>).</>}
-              fullWidth
-              autoComplete="off"
-              slotProps={{
-                inputLabel: { shrink: true },
-                input: {
-                  startAdornment: (
-                    <InputAdornment position="start" title={`ffmpeg -i ${inputFilename || 'input.mp4'}`}
-                      sx={{ maxWidth: '50%', flexShrink: 0, overflow: 'hidden' }}>
-                      <span className="block whitespace-nowrap overflow-hidden text-ellipsis">
-                        ffmpeg -i {inputFilename || 'input.mp4'}
-                      </span>
-                    </InputAdornment>
-                  ),
-                },
-              }}
-            />
-          </div>
-        ) : (
-          // Normal mode: choose a format and its settings.
-          <>
-            {/* "Desired format" dropdown, with one option per entry in FORMATS, e.g. ['MP3', 'MP3 (.mp3)']. */}
-            <SelectField id="codecs" label="Desired format" value={codec}
-              onChange={value => setCodec(value as Codec)}
-              options={Object.entries(FORMATS).map(([value, { label }]) => [value, label] as const)} />
+              <Step n={3} title="Encoder settings">
+                {/* The selected format's own controls, defined by its Panel in formats.tsx
+                    (e.g. MP3's encoding type and bitrate). They read `settings` and change them with `update`. */}
+                <format.Panel settings={settings} set={update} />
 
-            {/* Audio track picker. Shown when ffprobe has found more than one audio track.
-                Otherwise (or before ffprobe finishes, or if it fails) the default is used. */}
-            {audioStreams.length > 1 && (
-              <SelectField id="audio_track" label="Audio track" value={String(audioTrack)}
-                onChange={value => setChosenTrack(value === 'all' ? 'all' : Number(value))}
-                options={[
-                  ...(allowsAll ? [['all', 'All audio tracks'] as const] : []),
-                  // The value is the track's position among the audio tracks (0 is the first): -map 0:a:<position>.
-                  ...audioStreams.map((stream, position) => [String(position), trackLabel(stream)] as const),
-                ]} />
-            )}
-            <Divider sx={{ my: 2 }} />
+                {/* Options every format shares, shown only where they apply. */}
+                {/* Keep the input's video: only for formats that can go into a video file (keepVideo). */}
+                {format.keepVideo && (
+                  <div>
+                    <YesNoRadio name="keep_video" label="Output" value={settings.isKeepVideo}
+                      onChange={value => update('isKeepVideo', value)}
+                      yesLabel="Keep the video (if applicable)" noLabel="I want an audio file" />
+                  </div>
+                )}
 
-            <Typography variant="h5" component="h2" gutterBottom>
-              Encoder Settings
-            </Typography>
+                {/* Downmix to stereo: not for formats that copy the audio unchanged (copiesAudio). */}
+                {!format.copiesAudio && (
+                  <div>
+                    <YesNoRadio name="downmix" label="Downmix to stereo?" value={settings.downmixToStereo}
+                      onChange={value => update('downmixToStereo', value)} />
+                  </div>
+                )}
+              </Step>
 
-            {/* The selected format's own controls, defined by its Panel in formats.tsx
-                (e.g. MP3's encoding type and bitrate). They read `settings` and change them with `update`. */}
-            <format.Panel settings={settings} set={update} />
+              <Step n={4} title="Name the output">
+                {/* Output filename, without the extension; createFFmpegArgs adds the format's. */}
+                <TextField
+                  id="output_name"
+                  label="Output filename"
+                  value={outputName}
+                  onChange={e => setOutputName(e.target.value)}
+                  autoComplete="off"
+                  size="small"
+                  fullWidth
+                  sx={{ maxWidth: 320, my: 1.5 }}
+                  slotProps={{ htmlInput: { maxLength: 200 }, inputLabel: { shrink: true } }}
+                />
+              </Step>
+            </>
+          )}
+        </fieldset>
 
-            {/* Options every format shares, shown only where they apply. */}
-            {/* Keep the input's video: only for formats that can go into a video file (keepVideo). */}
-            {format.keepVideo && (
-              <div>
-                <YesNoRadio name="keep_video" label="Output" value={settings.isKeepVideo}
-                  onChange={value => update('isKeepVideo', value)}
-                  yesLabel="Keep the video (if applicable)" noLabel="I want an audio file" />
-              </div>
-            )}
-
-            {/* Downmix to stereo: not for formats that copy the audio unchanged (copiesAudio). */}
-            {!format.copiesAudio && (
-              <div>
-                <YesNoRadio name="downmix" label="Downmix to stereo?" value={settings.downmixToStereo}
-                  onChange={value => update('downmixToStereo', value)} />
-              </div>
-            )}
-            <Divider sx={{ my: 2 }} />
-
-            {/* Output filename, without the extension; createFFmpegArgs adds the format's. */}
-            <TextField
-              id="output_name"
-              label="Output filename"
-              value={outputName}
-              onChange={e => setOutputName(e.target.value)}
-              autoComplete="off"
-              size="small"
-              fullWidth
-              sx={{ maxWidth: 320, my: 1.5 }}
-              slotProps={{ htmlInput: { maxLength: 200 }, inputLabel: { shrink: true } }}
-            />
-          </>
-        )}
-      </fieldset>
-
-      {/* The command being run, shown only while converting. */}
-      <div className={`text-center my-4 ${isConverting ? 'block' : 'hidden'}`}>
-        {ffmpegCommand && <>Running: {ffmpegCommand}...</>}
-      </div>
-
-      {/* Progress (stage, percentage, speed, ETA) and the FFmpeg log. */}
-      <OperationStatus progress={status} busy={isConverting} logs={logs} />
-      {isConverting && <Button onClick={cancel}>Cancel</Button>}
-
-      {alert && <div className="w-full max-w-xs mx-auto"><Alert severity={alert.severity} sx={{ textAlign: 'center', my: 2, display: 'flex', justifyContent: 'center' }}>{alert.message}</Alert></div>}
-
-      {/* A link to download the converted file again, in case the automatic download was blocked. */}
-      {output && !isConverting && (
-        <Typography variant="body2">
-          If the download didn't start,{' '}
-          <a href={output.url} download={output.filename} className="underline text-sky-700">
-            download {output.filename}
-          </a>{' '}
-          ({formatBytes(output.size)}).
-        </Typography>
-      )}
-
-      {largeForDevice && !isConverting && (
-        <div className="w-full max-w-md mx-auto">
+        {largeForDevice && !isConverting && (
           <Alert severity="warning" sx={{ my: 2 }}>
             This file is large for this device's memory (about {deviceMemoryGB} GB). Keeping the video
             makes the converted file about as large, and the browser may run out of memory while saving it.
             Closing other tabs can help.
           </Alert>
-        </div>
-      )}
+        )}
 
-      {/* Hidden rather than removed during a conversion, so the page layout doesn't jump. */}
-      <div className={`mt-4 ${!isConverting ? 'block' : 'hidden'}`}>
-        <Button variant="contained" onClick={onConvertClicked}>Convert</Button>
+        {/* Hidden rather than removed during a conversion, so the page layout doesn't jump. */}
+        <div className={`mt-6 ${!isConverting ? 'block' : 'hidden'}`}>
+          <Button variant="contained" size="large" fullWidth onClick={onConvertClicked}
+            sx={{ py: 1.5, fontSize: '1.05rem' }}>
+            Convert
+          </Button>
+        </div>
+
+        {/* The command being run, shown only while converting. */}
+        <div className={`mt-6 text-left ${isConverting ? 'block' : 'hidden'}`}>
+          {ffmpegCommand && (
+            <div className="rounded-xl bg-black/50 ring-1 ring-white/10 p-3 font-mono text-xs text-slate-300 break-all">
+              <span className="text-slate-500">Running </span>
+              <span className="text-violet-300">$</span> {ffmpegCommand}
+            </div>
+          )}
+        </div>
+
+        {/* Progress (stage, percentage, speed, ETA) and the FFmpeg log. */}
+        <OperationStatus progress={status} busy={isConverting} logs={logs} />
+        {isConverting && (
+          <div className="mt-4">
+            <Button variant="outlined" color="inherit" onClick={cancel}
+              sx={{ borderColor: 'rgba(255,255,255,0.2)', color: 'text.secondary' }}>
+              Cancel
+            </Button>
+          </div>
+        )}
+
+        {alert && <Alert severity={alert.severity} sx={{ mt: 2 }}>{alert.message}</Alert>}
+
+        {/* A link to download the converted file again, in case the automatic download was blocked. */}
+        {output && !isConverting && (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            If the download didn't start,{' '}
+            <a href={output.url} download={output.filename} className="underline text-cyan-300 hover:text-cyan-200">
+              download {output.filename}
+            </a>{' '}
+            ({formatBytes(output.size)}).
+          </Typography>
+        )}
       </div>
-    </>
+    </div>
   );
 };
 
