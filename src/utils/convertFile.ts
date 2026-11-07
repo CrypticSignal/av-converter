@@ -1,11 +1,13 @@
 import type { FFFSType, FFmpeg } from '@ffmpeg/ffmpeg';
 import { toBlobURL } from '@ffmpeg/util';
 // Both cores are bundled by Vite as content-hashed assets, so browsers can cache them for good.
-import singleThreadCoreURL from '@ffmpeg/core?url';
-import singleThreadWasmURL from '@ffmpeg/core/wasm?url';
-import multiThreadCoreURL from '@ffmpeg/core-mt?url';
-import multiThreadWasmURL from '@ffmpeg/core-mt/wasm?url';
-import multiThreadWorkerURL from '@ffmpeg/core-mt/worker?url';
+// They're built from ffmpeg.wasm's source (see vendor/ffmpeg-core/README.md), because the
+// latest npm release lacks the fix for the Opus encoder running out of stack.
+import singleThreadCoreURL from '../../vendor/ffmpeg-core/st/ffmpeg-core.js?url';
+import singleThreadWasmURL from '../../vendor/ffmpeg-core/st/ffmpeg-core.wasm?url';
+import multiThreadCoreURL from '../../vendor/ffmpeg-core/mt/ffmpeg-core.js?url';
+import multiThreadWasmURL from '../../vendor/ffmpeg-core/mt/ffmpeg-core.wasm?url';
+import multiThreadWorkerURL from '../../vendor/ffmpeg-core/mt/ffmpeg-core.worker.js?url';
 import type { AlertColor } from '@mui/material';
 import { nonnegative, OperationProgress } from './progress';
 import { downloadFile } from './downloadFile';
