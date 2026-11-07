@@ -49,6 +49,9 @@ services:
         - action: rebuild
           path: ../../yarn.lock
 
+        - action: rebuild
+          path: ../../vendor
+
         - action: sync+restart
           path: ../../vite.config.ts
           target: /app/vite.config.ts

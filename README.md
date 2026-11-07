@@ -136,7 +136,7 @@ GitHub Actions runs both suites and the frontend build on every push to master a
 | `set_password.py` | Sets the downloader's password, saving its hash in `downloader-password.env`. |
 | `docker/prod/nginx.conf`, `nginx-http.conf` | Nginx for HTTPS, and HTTP only (local mode and first certificate). Both include `locations.conf`, the site's routes. |
 | `logging/index.ts` | Records page visits in Loki, viewable in Grafana at `/grafana/`. |
-| `@ffmpeg/core-mt`, `@ffmpeg/core` | The multi-threaded and single-threaded FFmpeg WebAssembly cores, which Vite bundles as content-hashed assets. Pages that aren't cross-origin isolated (no SharedArrayBuffer) fall back to the single-threaded core. |
+| `vendor/ffmpeg-core/` | The multi-threaded and single-threaded FFmpeg WebAssembly cores, which Vite bundles as content-hashed assets. Pages that aren't cross-origin isolated (no SharedArrayBuffer) fall back to the single-threaded core. They're built from ffmpeg.wasm's source, as the npm release can't encode Opus; its README explains why and how to rebuild them. |
 
 To add an output format:
 
