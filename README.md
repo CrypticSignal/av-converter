@@ -28,6 +28,8 @@
 
 Convert audio files or the audio tracks in a video using FFmpeg in your browser. Supports AAC, AC3, ALAC, DTS, FLAC, MP3, Opus, Vorbis, and WAV. The output contains exactly one audio track: the first, unless you pick another once the file's information has loaded (the picker appears for files with several). MKA, and outputs that keep the video, can instead hold all audio tracks; MKA does so by default. Keeping the video copies it unchanged, and for MKV to MKV also copies the subtitles and attachments. Manual command mode uses your own stream mapping.
 
+There's no limit on the input file's size: FFmpeg reads it directly from disk. The converted file, though, is held in the browser's memory until it's saved (about twice over at the peak), so a very large output, such as a long video with "Keep the video", can make the browser run out of memory. The page warns about this beforehand (in browsers that report the device's memory), and explains it if the tab crashes during a conversion.
+
 ## Video Downloader
 
 Click on Video Downloader in the navigation bar (or visit /download). This is essentially a [yt-dlp](https://github.com/yt-dlp/yt-dlp) wrapper.

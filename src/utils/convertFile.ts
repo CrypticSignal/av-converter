@@ -15,6 +15,12 @@ const INPUT_DIR = '/input';
 // FFFSType.WORKERFS; the package's runtime exports are stubbed outside browsers.
 const WORKERFS = 'WORKERFS' as FFFSType;
 const ERROR_PATTERN = /error|invalid|unsupported|unknown|not found|no such|could not|unable|cannot|failed/i;
+// How browsers and FFmpeg's WebAssembly runtime report running out of memory.
+const OUT_OF_MEMORY = /out of memory|allocation failed|Cannot enlarge memory|Aborted\(OOM\)|Invalid typed array length|Array buffer allocation/i;
+
+/** What to try after running out of memory. The converted file is held in memory until it's saved. */
+export const OUT_OF_MEMORY_ADVICE = 'The converted file is kept in memory until it\'s saved, so large outputs need a lot of it. '
+  + 'Try closing other tabs, or convert a shorter part of the file (e.g. in manual mode, -t 600 converts the first 10 minutes).';
 
 /**
  * The multi-threaded core needs SharedArrayBuffer, which browsers only provide on
@@ -149,6 +155,10 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
     report({ stage: 'Preparing output' });
     const fileData = await ffmpeg.readFile(outputFilename);
     checkActive();
+    // readFile returned a copy, so free FFmpeg's before making a third copy for the download.
+    // A large output would otherwise be held in memory three times at once.
+    await ffmpeg.deleteFile(outputFilename).catch(() => {});
+    checkActive();
     const bytes = fileData as Uint8Array;
     // Blob only accepts views of a plain ArrayBuffer. slice() copies shared memory into one.
     const blobPart = bytes.buffer instanceof ArrayBuffer ? bytes as Uint8Array<ArrayBuffer> : bytes.slice();
@@ -161,8 +171,14 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
   } catch (error) {
     if (isActive()) {
       console.error(error);
-      const detail = firstError ?? (error instanceof Error ? error.message : undefined);
-      onAlert('error', detail ? `An error occurred during conversion: ${detail}` : 'An error occurred during conversion.');
+      // ffmpeg.wasm passes errors from its worker on as plain strings.
+      const message = error instanceof Error ? error.message : typeof error === 'string' ? error : undefined;
+      const detail = firstError ?? message;
+      if (OUT_OF_MEMORY.test(`${message} ${firstError}`)) {
+        onAlert('error', `The browser ran out of memory during the conversion. ${OUT_OF_MEMORY_ADVICE}`);
+      } else {
+        onAlert('error', detail ? `An error occurred during conversion: ${detail}` : 'An error occurred during conversion.');
+      }
       report({ stage: 'Conversion failed' });
     }
   } finally {
