@@ -10,44 +10,48 @@ const MP4_FAMILY = ['.mp4', '.mov'];
 export const sanitizeFilename = (name: string): string =>
   name.trim().replace(/[/\\:*?"<>|\u0000-\u001f]/g, '_').replace(/^-/, '_');
 
+/** Which audio goes into the output: one track, by its position among the file's audio tracks (0 is the first), or all of them. */
+export type AudioTrack = number | 'all';
+
+/** Whether the output can hold several audio tracks: MKA, and any output that keeps the video (MP4, MOV or MKV). */
+export const allowsAllAudioTracks = (codec: Codec, settings: FormatSettings): boolean =>
+  Boolean(FORMATS[codec].allAudioTracks || (FORMATS[codec].keepVideo && settings.isKeepVideo));
+
 /** Build the FFmpeg arguments that convert `inputFilename` to `codec`, saved as `outputName` plus an extension. */
 export const createFFmpegArgs = (
   inputFilename: string,
   codec: Codec,
   settings: FormatSettings,
   outputName: string,
-  audioStream?: number,
+  audioTrack: AudioTrack,
 ): { ffmpegArgs: string[]; outputFilename: string } => {
   const format = FORMATS[codec];
-  const args = format.args(settings);
-  let extension = format.extension;
+  const keepVideo = Boolean(format.keepVideo && settings.isKeepVideo);
+  if (audioTrack === 'all' ? !allowsAllAudioTracks(codec, settings) : !(Number.isSafeInteger(audioTrack) && audioTrack >= 0)) {
+    throw new Error('Choose a valid audio track.');
+  }
 
-  if (format.keepVideo && settings.isKeepVideo) {
-    args.unshift('-c:V', 'copy');
-    const inputExtension = inputFilename.slice(inputFilename.lastIndexOf('.')).toLowerCase();
+  // With the video, keep the input's container if it's MP4/MOV and the format allows it; otherwise use MKV.
+  const inputExtension = inputFilename.slice(inputFilename.lastIndexOf('.')).toLowerCase();
+  let extension = format.extension;
+  if (keepVideo) {
     const keepsContainer = format.keepVideo === 'mp4' && MP4_FAMILY.includes(inputExtension);
     extension = keepsContainer ? inputExtension : '.mkv';
   }
-  if (audioStream !== undefined) {
-    if (!Number.isSafeInteger(audioStream) || audioStream < 0) {
-      throw new Error('Choose a valid audio track.');
-    }
-    // ffprobe reports absolute stream indexes, not audio-only positions. Replace
-    // the format's broad audio mapping so selecting a track never duplicates it.
-    const mapping = args.indexOf('-map');
-    if (mapping >= 0 && args[mapping + 1] === '0') {
-      // FLAC with video keeps subtitles/attachments too: remove only its audio
-      // streams, then add the selected one, preserving all other stream types.
-      args.splice(mapping + 2, 0, '-map', '-0:a', '-map', `0:${audioStream}`);
-    } else if (mapping >= 0) {
-      args[mapping + 1] = `0:${audioStream}`;
-    } else {
-      // An explicit audio map disables FFmpeg's automatic video selection. Add
-      // video back only when requested; '?' also allows audio-only inputs.
-      args.unshift(...(format.keepVideo && settings.isKeepVideo ? ['-map', '0:V?'] : []),
-        '-map', `0:${audioStream}`);
-    }
+
+  // Say exactly which streams go into the output. Once there's a -map, FFmpeg adds nothing
+  // else by itself, so an audio file never picks up video and a single-track file never
+  // gets several audio tracks.
+  const args = ['-map', audioTrack === 'all' ? '0:a' : `0:a:${audioTrack}`];
+  if (keepVideo) {
+    // The video, copied as it is. 'V' leaves out cover art; '?' allows inputs without video.
+    args.unshift('-map', '0:V?');
+    args.push('-c:V', 'copy');
+    // MKV to MKV: copy the subtitles and attachments (such as fonts) too. Subtitles from
+    // other containers (e.g. MP4's mov_text) can't be copied into MKV, so they're left out.
+    if (inputExtension === '.mkv' && extension === '.mkv') args.push('-map', '0:s?', '-map', '0:t?', '-c:s', 'copy');
   }
+  args.push(...format.args(settings));
   if (settings.downmixToStereo && !format.copiesAudio) args.push('-ac', '2');
 
   const outputFilename = sanitizeFilename(outputName) + extension;

@@ -67,9 +67,12 @@ interface Format {
   keepVideo?: 'mp4' | 'mkv';
   /** Set when the audio is copied unchanged, so it can't be downmixed to stereo. */
   copiesAudio?: true;
-  /** Set when the format keeps every audio track by default, rather than FFmpeg's choice of one. */
-  mapsAllAudio?: true;
-  /** The FFmpeg arguments that encode the audio. createFFmpegArgs adds the input, output and shared options. */
+  /** Set when the format keeps every audio track unless the user picks one. */
+  allAudioTracks?: true;
+  /**
+   * The FFmpeg arguments that encode the audio. createFFmpegArgs adds the input, the output,
+   * which streams to include (-map), and the shared options.
+   */
   args: (settings: FormatSettings) => string[];
   /** The format's controls, shown under "Encoder settings". */
   Panel: (props: { settings: FormatSettings; set: SetSetting }) => React.ReactNode;
@@ -139,12 +142,7 @@ export const FORMATS: Record<Codec, Format> = {
     label: 'FLAC (.flac)',
     extension: '.flac',
     keepVideo: 'mkv',
-    mapsAllAudio: true,
-    // With the video, keep every stream (including subtitles); otherwise only the audio streams.
-    args: s => [
-      ...(s.isKeepVideo ? ['-map', '0', '-c:s', 'copy'] : ['-map', '0:a']),
-      '-c:a', 'flac', '-compression_level', s.flacCompression,
-    ],
+    args: s => ['-c:a', 'flac', '-compression_level', s.flacCompression],
     Panel: ({ settings, set }) => <>
       <LabeledSlider id="flac_compression" label="Compression level" value={settings.flacCompression}
         onChange={v => set('flacCompression', v)} min={0} max={12} step={1} />
@@ -156,8 +154,9 @@ export const FORMATS: Record<Codec, Format> = {
     label: 'MKA (.mka)',
     extension: '.mka',
     copiesAudio: true,
-    mapsAllAudio: true,
-    args: () => ['-map', '0:a', '-c:a', 'copy'],
+    // An MKA file is usually made to keep all of a video's audio tracks.
+    allAudioTracks: true,
+    args: () => ['-c:a', 'copy'],
     Panel: NoSettings,
   },
 
@@ -221,8 +220,7 @@ export const FORMATS: Record<Codec, Format> = {
   Vorbis: {
     label: 'Vorbis (.ogg)',
     extension: '.ogg',
-    mapsAllAudio: true,
-    args: s => ['-map', '0:a', '-c:a', 'libvorbis',
+    args: s => ['-c:a', 'libvorbis',
       ...(s.vorbisEncodingType === 'abr' ? ['-b:a', `${s.vorbisBitrate}k`] : ['-q:a', s.vorbisQuality])],
     Panel: ({ settings, set }) => <>
       <SelectField id="vorbis_encoding_type" label="Encoding type" value={settings.vorbisEncodingType}

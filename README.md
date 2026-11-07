@@ -26,7 +26,7 @@
 
 ## Audio/Video Converter
 
-Convert audio files or the audio tracks in a video using FFmpeg in your browser. Supports AAC, AC3, ALAC, DTS, FLAC, MP3, Opus, Vorbis, and WAV. After file information loads, choose an audio track by its stream index, language/title (when available), codec, and channel details. Leaving the default preserves the format's existing mapping, explained below the selector; choosing a track includes only that audio stream. Manual command mode uses your own stream mapping.
+Convert audio files or the audio tracks in a video using FFmpeg in your browser. Supports AAC, AC3, ALAC, DTS, FLAC, MP3, Opus, Vorbis, and WAV. The output contains exactly one audio track: the first, unless you pick another once the file's information has loaded (the picker appears for files with several). MKA, and outputs that keep the video, can instead hold all audio tracks; MKA does so by default. Keeping the video copies it unchanged, and for MKV to MKV also copies the subtitles and attachments. Manual command mode uses your own stream mapping.
 
 ## Video Downloader
 
@@ -111,7 +111,7 @@ GitHub Actions runs both suites and the frontend build on every push to master a
 | --- | --- |
 | `src/formats.tsx` | One entry per output format: its label, extension, FFmpeg arguments and settings panel. |
 | `src/components/` | Small shared form controls (select, slider, yes/no radio, file input) and the status panel. |
-| `src/utils/createFFmpegArgs.ts` | Combines a format's arguments with the shared options: keep the video, downmix to stereo. |
+| `src/utils/createFFmpegArgs.ts` | Builds the full FFmpeg command: which streams to include (`-map`), the format's arguments, and the shared options (keep the video, downmix to stereo). |
 | `src/utils/convertFile.ts` | Runs FFmpeg (WebAssembly) in the browser and downloads the result. |
 | `src/pages/Homepage.tsx` | The converter page. |
 | `src/utils/manualCommand.ts` | Checks and builds the arguments for a manual FFmpeg command. |
