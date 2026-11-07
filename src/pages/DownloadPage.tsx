@@ -131,8 +131,14 @@ export default function DownloadPage() {
   }
 
   return (
-    <Container maxWidth="sm" sx={{ py: 5 }}>
-      <Box component="form" onSubmit={download} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <Container maxWidth="sm" sx={{ py: 6 }}>
+      <header className="pb-8">
+        <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
+          <span className="gradient-text">Video</span> Downloader
+        </h1>
+        <p className="mt-3 text-slate-400">Paste a link and pick what you want to keep.</p>
+      </header>
+      <Box className="glass-card float-in rounded-3xl p-5 sm:p-8 text-left" component="form" onSubmit={download} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         <TextField name="password" label="Password" type="password" required fullWidth value={password}
           disabled={busy} onChange={event => setPassword(event.target.value)}
           slotProps={{ htmlInput: { autoComplete: 'current-password', maxLength: 1024 } }} />
@@ -144,10 +150,11 @@ export default function DownloadPage() {
           helperText={DOWNLOAD_TYPES.find(type => type.value === downloadType)?.description}>
           {DOWNLOAD_TYPES.map(type => <MenuItem key={type.value} value={type.value}>{type.label}</MenuItem>)}
         </TextField>}
-        <Button type="submit" variant="contained" disabled={busy || !url.trim() || !password}>
+        <Button type="submit" variant="contained" size="large" sx={{ py: 1.4 }} disabled={busy || !url.trim() || !password}>
           {busy ? 'Preparing download…' : 'Download'}
         </Button>
-        {busy && <Button type="button" onClick={cancel}>Cancel</Button>}
+        {busy && <Button type="button" variant="outlined" color="inherit" onClick={cancel}
+          sx={{ borderColor: 'rgba(255,255,255,0.2)', color: 'text.secondary' }}>Cancel</Button>}
         <OperationStatus progress={status} busy={busy} logs={output} />
         {error && <Alert severity="error">{error}</Alert>}
         {result && <Alert severity="success">
