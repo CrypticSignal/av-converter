@@ -13,13 +13,14 @@ import { nonnegative, OperationProgress } from './progress';
 import { downloadFile } from './downloadFile';
 
 const loads = new WeakMap<FFmpeg, Promise<void>>();
+/** Instances whose load has succeeded (their promise in `loads` has resolved). */
+const finishedLoads = new WeakSet<FFmpeg>();
 const INPUT_DIR = '/input';
 // FFFSType.WORKERFS; the package's runtime exports are stubbed outside browsers.
 const WORKERFS = 'WORKERFS' as FFFSType;
 const ERROR_PATTERN = /error|invalid|unsupported|unknown|not found|no such|could not|unable|cannot|failed/i;
 // How browsers and FFmpeg's WebAssembly runtime report running out of memory.
 const OUT_OF_MEMORY = /out of memory|allocation failed|Cannot enlarge memory|Aborted\(OOM\)|Invalid typed array length|Array buffer allocation/i;
-
 /** What to try after running out of memory. The converted file is held in memory until it's saved. */
 export const OUT_OF_MEMORY_ADVICE = 'The converted file has to fit in the browser\'s memory until it\'s saved. '
   + 'Try converting a shorter part of the file (e.g. in manual mode, -t 600 converts the first 10 minutes), or closing other tabs.';
@@ -46,16 +47,27 @@ const withTimeout = async <T>(ffmpeg: FFmpeg, request: Promise<T>): Promise<T> =
   }
 };
 
+/** Set once the multi-threaded core fails to load. From then on, this page uses the single-threaded one. */
+let threadsFailed = false;
+/** Instances moved to the single-threaded core after running out of memory with threads. */
+const singleThreaded = new WeakSet<FFmpeg>();
+/** Whether each loaded instance runs the multi-threaded core. */
+const loadedWithThreads = new WeakMap<FFmpeg, boolean>();
+
 /**
  * The multi-threaded core needs SharedArrayBuffer, which browsers only provide on
  * cross-origin isolated pages (served with COOP and COEP headers). Elsewhere, such as
  * some embedded browsers or behind a proxy that strips the headers, use the slower
- * single-threaded core instead of failing.
+ * single-threaded core instead of failing. It's also used once the multi-threaded core
+ * has failed to load, e.g. when the browser can't spare the 1 GB of memory it reserves.
  */
 export const canUseThreads = (): boolean =>
-  globalThis.crossOriginIsolated === true && typeof SharedArrayBuffer !== 'undefined';
+  !threadsFailed && globalThis.crossOriginIsolated === true && typeof SharedArrayBuffer !== 'undefined';
 
-const coreFiles = (): [url: string, type: string][] => canUseThreads()
+/** Whether this instance runs the multi-threaded core. False until it has loaded. */
+export const usesThreads = (ffmpeg: FFmpeg): boolean => loadedWithThreads.get(ffmpeg) === true;
+
+const coreFiles = (threads: boolean): [url: string, type: string][] => threads
   ? [
       [multiThreadCoreURL, 'text/javascript'],
       [multiThreadWasmURL, 'application/wasm'],
@@ -66,29 +78,75 @@ const coreFiles = (): [url: string, type: string][] => canUseThreads()
       [singleThreadWasmURL, 'application/wasm'],
     ];
 
+/** The core's files were fetched, but the core failed to start. */
+class CoreStartError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+  }
+}
+
+/** Fetch a core's files as blob URLs and start it. Failing to start throws a CoreStartError. */
+const loadCore = async (ffmpeg: FFmpeg, threads: boolean, isActive: () => boolean) => {
+  const urls: string[] = [];
+  try {
+    // Create sequentially so even a partial failure releases every created URL.
+    for (const [url, type] of coreFiles(threads)) {
+      if (!isActive()) throw new Error('Page unmounted');
+      urls.push(await toBlobURL(url, type));
+    }
+    if (!isActive()) throw new Error('Page unmounted');
+    const [coreURL, wasmURL, workerURL] = urls;
+    // The single-threaded core has no worker file.
+    try {
+      await ffmpeg.load({ coreURL, wasmURL, ...(workerURL && { workerURL }) });
+    } catch (error) {
+      throw new CoreStartError(error);
+    }
+    loadedWithThreads.set(ffmpeg, threads);
+  } finally {
+    urls.forEach(url => URL.revokeObjectURL(url));
+  }
+};
+
 export const loadFFmpeg = (ffmpeg: FFmpeg, isActive = () => true): Promise<void> => {
   const existing = loads.get(ffmpeg);
-  if (existing) return existing;
+  // A finished load is stale once the worker has been terminated (e.g. after it stopped
+  // responding), and the instance then needs loading again.
+  if (existing && (ffmpeg.loaded || !finishedLoads.has(ffmpeg))) return existing;
+  finishedLoads.delete(ffmpeg);
   const load = (async () => {
-    const urls: string[] = [];
+    const threads = canUseThreads() && !singleThreaded.has(ffmpeg);
     try {
-      // Create sequentially so even a partial failure releases every created URL.
-      for (const [url, type] of coreFiles()) {
-        if (!isActive()) throw new Error('Page unmounted');
-        urls.push(await toBlobURL(url, type));
-      }
-      if (!isActive()) throw new Error('Page unmounted');
-      const [coreURL, wasmURL, workerURL] = urls;
-      // The single-threaded core has no worker file.
-      await ffmpeg.load({ coreURL, wasmURL, ...(workerURL && { workerURL }) });
-    } finally {
-      urls.forEach(url => URL.revokeObjectURL(url));
+      await loadCore(ffmpeg, threads, isActive);
+    } catch (error) {
+      // Only a core that failed to start is the threads' fault, not a failed download or a
+      // cancelled load (terminating the worker also fails the load, but isActive is then false).
+      if (!threads || !(error instanceof CoreStartError) || !isActive()) throw error;
+      // The multi-threaded core reserves 1 GB of memory and starts 32 threads up front,
+      // which some browsers and devices refuse. The single-threaded core needs far less.
+      console.warn('The multi-threaded FFmpeg core failed to load, so the single-threaded one is used.', error);
+      threadsFailed = true;
+      ffmpeg.terminate(); // Discard the failed worker; the next load starts a new one.
+      await loadCore(ffmpeg, false, isActive);
     }
+    finishedLoads.add(ffmpeg);
   })();
   loads.set(ffmpeg, load);
   // A failed load can be retried; successful loads stay cached per instance.
   void load.catch(() => { if (loads.get(ffmpeg) === load) loads.delete(ffmpeg); });
   return load;
+};
+
+/**
+ * Restart an instance on the single-threaded core, which it then keeps. FFmpeg's memory can
+ * grow to about 2 GB there, while the multi-threaded core's is fixed at 1 GB.
+ */
+const switchToSingleThread = (ffmpeg: FFmpeg, isActive: () => boolean) => {
+  singleThreaded.add(ffmpeg);
+  ffmpeg.terminate();
+  loads.delete(ffmpeg);
+  finishedLoads.delete(ffmpeg);
+  return loadFFmpeg(ffmpeg, isActive);
 };
 
 export interface ConversionJob {
@@ -117,8 +175,27 @@ export interface ConvertedFile {
 }
 
 export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
+  // If the multi-threaded core crashes, most likely by running out of memory, try once more
+  // with the single-threaded one, whose memory can grow further. It's slower, but can finish
+  // where threads can't (e.g. with very large video frames, or filters that buffer a lot).
+  if (await convertOnce(ffmpeg, job, false) === 'retry single-threaded') {
+    await convertOnce(ffmpeg, job, true);
+  }
+};
+
+const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, isRetry: boolean): Promise<'retry single-threaded' | void> => {
   const { file, ffmpegArgs, outputFilename, knownTimeline, isActive, onAlert, onStatus, onLog, onOutput } = job;
   const inputFilename = file.name;
+  let retry = false;
+  // Whether the multi-threaded core failed to start just now, so the single-threaded one is used.
+  let fellBack = false;
+  /**
+   * Whether the core crashed while running the command. The multi-threaded core's memory is
+   * fixed at 1 GB, and FFmpeg needing more makes it crash (ffmpeg.wasm then reports a
+   * TypeError rather than running out of memory). The single-threaded core's memory can grow
+   * to about 2 GB. Files, including the output, are held outside that memory.
+   */
+  let execCrashed = false;
   let duration: number | undefined;
   let started: number | undefined;
   // FFmpeg's first error line is usually the root cause; later ones are consequences.
@@ -153,10 +230,19 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
   const inputPath = `${INPUT_DIR}/${inputFilename}`;
   try {
     checkActive();
-    onAlert('info', canUseThreads() ? 'Loading FFmpeg...'
-      : 'Loading FFmpeg. This browser does not allow multi-threading here, so conversion will be slower.');
     report({ stage: 'Loading FFmpeg' });
-    await loadFFmpeg(ffmpeg, isActive);
+    if (isRetry) {
+      onAlert('warning', 'Multi-threaded FFmpeg crashed, most likely by running out of memory, so trying again '
+        + 'without multi-threading. This is slower, but can use more memory.');
+      onLog('The multi-threaded core crashed. Retrying with the single-threaded core.');
+      await switchToSingleThread(ffmpeg, isActive);
+    } else {
+      onAlert('info', canUseThreads() ? 'Loading FFmpeg...'
+        : 'Loading FFmpeg. This browser does not allow multi-threading here, so conversion will be slower.');
+      const expectedThreads = canUseThreads();
+      await loadFFmpeg(ffmpeg, isActive);
+      fellBack = expectedThreads && !usesThreads(ffmpeg);
+    }
     checkActive();
     ffmpeg.on('log', handleLog);
     ffmpeg.on('progress', handleProgress);
@@ -172,8 +258,17 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
     const args = ffmpegArgs.map((arg, i) => ffmpegArgs[i - 1] === '-i' && arg === inputFilename ? inputPath : arg);
     started = performance.now();
     report({ stage: 'Converting' });
-    onAlert('info', 'Converting');
-    const exitCode = await ffmpeg.exec(args);
+    onAlert('info', isRetry ? 'Converting without multi-threading'
+      : fellBack ? 'Converting. Multi-threaded FFmpeg failed to start in this browser, so this will be slower.'
+      : 'Converting');
+    let exitCode: number;
+    try {
+      exitCode = await ffmpeg.exec(args);
+    } catch (error) {
+      // FFmpeg reports its own errors as an exit code, so a throw means the core itself crashed.
+      execCrashed = true;
+      throw error;
+    }
     checkActive();
     if (exitCode !== 0) throw new Error(`FFmpeg exited with code ${exitCode}`);
     report({ stage: 'Preparing output' });
@@ -199,12 +294,14 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
       // ffmpeg.wasm passes errors from its worker on as plain strings.
       const message = error instanceof Error ? error.message : typeof error === 'string' ? error : undefined;
       const detail = firstError ?? message;
-      if (OUT_OF_MEMORY.test(`${message} ${firstError}`)) {
+      if (execCrashed && !isRetry && usesThreads(ffmpeg)) {
+        retry = true;
+      } else if (OUT_OF_MEMORY.test(`${message} ${firstError}`)) {
         onAlert('error', `The browser ran out of memory for the converted file. ${OUT_OF_MEMORY_ADVICE}`);
       } else {
         onAlert('error', detail ? `An error occurred during conversion: ${detail}` : 'An error occurred during conversion.');
       }
-      report({ stage: 'Conversion failed' });
+      if (!retry) report({ stage: 'Conversion failed' });
     }
   } finally {
     ffmpeg.off('log', handleLog);
@@ -213,4 +310,5 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
     if (filesTouched && isActive()) await ffmpeg.deleteFile(outputFilename).catch(() => {});
     if (inputMounted && isActive()) await ffmpeg.unmount(INPUT_DIR).catch(() => {});
   }
+  if (retry) return 'retry single-threaded';
 };
