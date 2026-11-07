@@ -148,8 +148,9 @@ const Homepage = (): React.JSX.Element => {
     ? mediaInfo.info.streams.filter(stream => stream.type === 'audio') : [];
   // Whether the output can hold every audio track (MKA, or when keeping the video).
   const allowsAll = allowsAllAudioTracks(codec, settings);
-  // Keeping the video makes an output about as large as the input. The converted file is held
-  // in memory (about twice over at the peak), so warn when it's large for this device.
+  // Keeping the video makes the output about as large as the input, and the converted file is
+  // held in memory until it's saved (about twice over at the peak), so warn when it's large
+  // for this device's memory.
   const largeForDevice = !manualMode && file !== undefined && Boolean(format.keepVideo && settings.isKeepVideo)
     && deviceMemoryGB !== undefined && file.size > deviceMemoryGB * 1024 ** 3 / 4;
   // The audio track that will be converted: the user's choice, else all tracks for MKA and the
@@ -272,6 +273,8 @@ const Homepage = (): React.JSX.Element => {
       markConversionEnded();
       session.current = null;
       setIsConverting(false);
+      // If FFmpeg stopped responding, convertFile stopped its worker: start a fresh one next time.
+      if (!ffmpeg.loaded) ffmpegRef.current = null;
     });
   };
 
