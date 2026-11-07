@@ -35,7 +35,7 @@ There's no limit on the input file's size: FFmpeg reads it directly from disk. T
 
 #### YouTube cookies
 
-If YouTube asks yt-dlp to sign in, export your YouTube cookies in Netscape format and save them as `cookies.txt` in the project root (`downloader/cookies.txt` without Docker). Without the file, downloads are anonymous. Cookies are login credentials, so never commit them, and expect to replace them when they expire.
+If YouTube asks yt-dlp to sign in, export your YouTube cookies in Netscape format and save them as `cookies.txt` in the project root. Without the file, downloads are anonymous. Cookies are login credentials, so never commit them, and expect to replace them when they expire.
 
 #### Password
 
