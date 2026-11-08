@@ -80,8 +80,13 @@ describe('keeping the video', () => {
 
   it('also copies subtitles and attachments into MKV', () => {
     expect(run('in.mkv', 'FLAC', { isKeepVideo: true }, 1).ffmpegArgs)
-      .toEqual(['-i', 'in.mkv', '-map', '0:V?', '-map', '0:a:1', '-c:V', 'copy',
+      .toEqual(['-fflags', '+genpts', '-i', 'in.mkv', '-map', '0:V?', '-map', '0:a:1', '-c:V', 'copy',
         '-map', '0:s?', '-map', '0:t?', '-c:s', 'copy', '-c:a', 'flac', '-compression_level', '5', 'output.mkv']);
+  });
+
+  it('generates missing timestamps only when the output is MKV', () => {
+    expect(run('in.mpg', 'FLAC', { isKeepVideo: true }).ffmpegArgs.slice(0, 3)).toEqual(['-fflags', '+genpts', '-i']);
+    expect(run('in.mpg', 'MP3', { isKeepVideo: true }).ffmpegArgs[0]).toBe('-i');
   });
 
   it.each<[Codec, string, string]>([
