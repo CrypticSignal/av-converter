@@ -184,6 +184,15 @@ const withBitrate = { args: bitrate, Panel: BitratePanel };
 const fitInto = (width: number, height: number) =>
   `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
 
+/**
+ * FFmpeg's RealMedia muxer can't write a packet over 64 kB, and RealVideo frames larger than
+ * about CIF easily exceed that (720p fails even at the default quality). At 352x288, even
+ * pure noise at the best quality stays under 57 kB per frame. AVI has no such limit.
+ */
+const realMediaFit = (s: FormatSettings): string[] =>
+  videoContainerOf(s) === 'rm' ? ['-vf', fitInto(352, 288)] : [];
+const REAL_MEDIA_NOTE = 'In RealMedia (.rm), the video is resized to fit 352x288, as larger frames are too big for the format. AVI keeps the original size.';
+
 const COMMON_VIDEO = ['mkv', 'mov', 'avi', 'nut'] as const satisfies Container[];
 const AVI_ONLY = ['avi'] as const satisfies Container[];
 
@@ -402,11 +411,20 @@ export const VIDEO_ENCODERS: Record<string, VideoEncoder> = {
   msmpeg4v2: older('MPEG-4 part 2 Microsoft variant v2 (msmpeg4v2)', ['avi', 'mkv', 'mov', 'nut'], withQscale),
   wmv2: older('Windows Media Video 8 (wmv2)', ['wmv', 'avi', 'mkv', 'mov', 'nut'], withQscale),
   wmv1: older('Windows Media Video 7 (wmv1)', ['wmv', 'avi', 'mkv', 'mov', 'nut'], withQscale),
-  rv20: older('RealVideo 2.0 (rv20)', ['rm', 'avi'], withQscale),
+  rv20: older('RealVideo 2.0 (rv20)', ['rm', 'avi'], {
+    args: s => [...realMediaFit(s), ...qscale(s)],
+    Panel: QscalePanel,
+    note: REAL_MEDIA_NOTE,
+  }),
   rv10: older('RealVideo 1.0 (rv10)', ['rm', 'avi'], {
     // RealVideo 1.0's frame size must be a multiple of 16, so a few edge pixels may be cropped.
-    args: s => ['-vf', 'crop=trunc(iw/16)*16:trunc(ih/16)*16', ...qscale(s)],
+    // 352x288 already is.
+    args: s => {
+      const fit = realMediaFit(s);
+      return [...(fit.length ? fit : ['-vf', 'crop=trunc(iw/16)*16:trunc(ih/16)*16']), ...qscale(s)];
+    },
     Panel: QscalePanel,
+    note: REAL_MEDIA_NOTE,
   }),
   svq1: older('Sorenson Video 1 (svq1)', ['mov', 'mkv', 'avi', 'nut']),
   snow: older('Snow (snow)', ['avi', 'mkv', 'nut'], withQscale),

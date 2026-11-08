@@ -176,19 +176,32 @@ export interface ConvertedFile {
   size: number;
 }
 
+/**
+ * How long the multi-threaded core may go without a log line or progress report from FFmpeg
+ * before the conversion counts as hung. Threads can make it hang without any error
+ * (https://github.com/ffmpegwasm/ffmpeg.wasm/issues/597). FFmpeg reports progress as frames
+ * go through, and even the slowest encoder here (Cinepak, about 2 s per 720p frame) stays
+ * far below this.
+ */
+export const STALL_TIMEOUT_MS = 120_000;
+
+/** Why a conversion is tried again on the single-threaded core. */
+type RetryReason = 'crashed' | 'stalled';
+
 export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
-  // If the multi-threaded core crashes, most likely by running out of memory, try once more
-  // with the single-threaded one, whose memory can grow further. It's slower, but can finish
-  // where threads can't (e.g. with very large video frames, or filters that buffer a lot).
-  if (await convertOnce(ffmpeg, job, false) === 'retry single-threaded') {
-    await convertOnce(ffmpeg, job, true);
-  }
+  // If the multi-threaded core crashes (most likely by running out of memory) or stops
+  // responding, try once more with the single-threaded one. Its memory can grow further, and
+  // it has no threads to hang. It's slower, but can finish where threads can't (e.g. with very
+  // large video frames, or filters that buffer a lot).
+  const retry = await convertOnce(ffmpeg, job);
+  if (retry) await convertOnce(ffmpeg, job, retry);
 };
 
-const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, isRetry: boolean): Promise<'retry single-threaded' | void> => {
+const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, retryReason?: RetryReason): Promise<RetryReason | void> => {
+  const isRetry = retryReason !== undefined;
   const { file, ffmpegArgs, outputFilename, knownTimeline, outputDuration, isActive, onAlert, onStatus, onLog, onOutput } = job;
   const inputFilename = file.name;
-  let retry = false;
+  let retry: RetryReason | undefined;
   // Whether the multi-threaded core failed to start just now, so the single-threaded one is used.
   let fellBack = false;
   /**
@@ -198,6 +211,10 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, isRetry: boolean)
    * to about 2 GB. Files, including the output, are held outside that memory.
    */
   let execCrashed = false;
+  /** Whether the watchdog stopped the core because FFmpeg stopped responding. */
+  let stalled = false;
+  /** When FFmpeg last logged or reported progress (Date.now()). */
+  let lastActivity = Date.now();
   let duration: number | undefined = knownTimeline ? outputDuration : undefined;
   let started: number | undefined;
   // FFmpeg's first error line is usually the root cause; later ones are consequences.
@@ -205,6 +222,7 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, isRetry: boolean)
   const report = (value: OperationProgress) => { if (isActive()) onStatus(value); };
   const checkActive = () => { if (!isActive()) throw new Error('Page unmounted'); };
   const handleLog = ({ message }: { message: string }) => {
+    lastActivity = Date.now();
     if (!isActive()) return;
     onLog(message);
     if (firstError === undefined && message !== 'Conversion failed!' && ERROR_PATTERN.test(message)) {
@@ -217,6 +235,7 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, isRetry: boolean)
     }
   };
   const handleProgress = ({ time }: { progress: number; time?: number }) => {
+    lastActivity = Date.now();
     if (!isActive() || started === undefined) return;
     const elapsed = (performance.now() - started) / 1000;
     const seconds = nonnegative(time) ? time / 1_000_000 : undefined;
@@ -233,7 +252,13 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, isRetry: boolean)
   try {
     checkActive();
     report({ stage: 'Loading FFmpeg' });
-    if (isRetry) {
+    if (retryReason === 'stalled') {
+      onAlert('warning', 'Multi-threaded FFmpeg stopped responding, so trying again without multi-threading. '
+        + 'This is slower.');
+      onLog(`The multi-threaded core stopped responding for ${STALL_TIMEOUT_MS / 1000} seconds. `
+        + 'Retrying with the single-threaded core.');
+      await switchToSingleThread(ffmpeg, isActive);
+    } else if (isRetry) {
       onAlert('warning', 'Multi-threaded FFmpeg crashed, most likely by running out of memory, so trying again '
         + 'without multi-threading. This is slower, but can use more memory.');
       onLog('The multi-threaded core crashed. Retrying with the single-threaded core.');
@@ -264,12 +289,23 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, isRetry: boolean)
       : fellBack ? 'Converting. Multi-threaded FFmpeg failed to start in this browser, so this will be slower.'
       : 'Converting');
     let exitCode: number;
+    // Only the multi-threaded core hangs this way. The single-threaded one is slower per frame,
+    // so a slow frame there is less clearly a hang, and it has no other core to fall back to.
+    lastActivity = Date.now();
+    const watchdog = usesThreads(ffmpeg) ? setInterval(() => {
+      if (Date.now() - lastActivity < STALL_TIMEOUT_MS) return;
+      stalled = true;
+      ffmpeg.terminate(); // Makes the exec below fail.
+    }, 1000) : undefined;
     try {
       exitCode = await ffmpeg.exec(args);
     } catch (error) {
-      // FFmpeg reports its own errors as an exit code, so a throw means the core itself crashed.
+      // FFmpeg reports its own errors as an exit code, so a throw means the core itself crashed
+      // (or the watchdog stopped it).
       execCrashed = true;
       throw error;
+    } finally {
+      clearInterval(watchdog);
     }
     checkActive();
     if (exitCode !== 0) throw new Error(`FFmpeg exited with code ${exitCode}`);
@@ -297,7 +333,7 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, isRetry: boolean)
       const message = error instanceof Error ? error.message : typeof error === 'string' ? error : undefined;
       const detail = firstError ?? message;
       if (execCrashed && !isRetry && usesThreads(ffmpeg)) {
-        retry = true;
+        retry = stalled ? 'stalled' : 'crashed';
       } else if (OUT_OF_MEMORY.test(`${message} ${firstError}`)) {
         onAlert('error', `The browser ran out of memory for the converted file. ${OUT_OF_MEMORY_ADVICE}`);
       } else {
@@ -312,5 +348,5 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, isRetry: boolean)
     if (filesTouched && isActive()) await ffmpeg.deleteFile(outputFilename).catch(() => {});
     if (inputMounted && isActive()) await ffmpeg.unmount(INPUT_DIR).catch(() => {});
   }
-  if (retry) return 'retry single-threaded';
+  return retry;
 };

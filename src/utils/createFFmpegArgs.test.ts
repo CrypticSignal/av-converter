@@ -191,6 +191,21 @@ describe('video encoders', () => {
       .toBe('fps=15,scale=480:-2,split[a][b];[a]palettegen=stats_mode=single[p];[b][p]paletteuse=new=1');
   });
 
+  it('fits RealVideo into 352x288 in RealMedia, whose packets are limited to 64 kB, but not in AVI', () => {
+    const fit = 'scale=352:288:force_original_aspect_ratio=decrease,pad=352:288:(ow-iw)/2:(oh-ih)/2,setsar=1';
+    const vf = (videoEncoder: string, videoContainer: string, settings: Partial<FormatSettings> = {}) => {
+      const args = video({ videoEncoder, videoContainer, videoAudio: 'none', ...settings }).ffmpegArgs;
+      return args[args.indexOf('-vf') + 1];
+    };
+    expect(vf('rv20', 'rm')).toBe(fit);
+    expect(vf('rv10', 'rm')).toBe(fit);
+    expect(video({ videoEncoder: 'rv20', videoContainer: 'avi', videoAudio: 'none' }).ffmpegArgs).not.toContain('-vf');
+    // RealVideo 1.0 still needs a multiple of 16 in AVI.
+    expect(vf('rv10', 'avi')).toBe('crop=trunc(iw/16)*16:trunc(ih/16)*16');
+    // A chosen size goes first, so the fit still wins.
+    expect(vf('rv20', 'rm', { videoWidth: '1280' })).toBe(`scale=1280:-2,${fit}`);
+  });
+
   it('encodes AV1 with libaom in realtime mode, or SVT-AV1 with one logical processor', () => {
     const encode = (videoEncoder: string, settings: Partial<FormatSettings> = {}) => {
       const args = video({ videoEncoder, videoContainer: 'webm', videoAudio: 'none', ...settings }).ffmpegArgs;

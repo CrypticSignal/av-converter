@@ -19,11 +19,22 @@ const checkManualOutputFilename = (name: string, hasFormatOption: boolean) => {
 };
 
 /**
- * Encoding video with multi-threaded FFmpeg needs an explicit thread count, or it can hang:
- * https://github.com/ffmpegwasm/ffmpeg.wasm/issues/597. Firefox is left out.
+ * Thread limits for encoding video with multi-threaded FFmpeg, to go right after the input.
+ * Left alone, FFmpeg sizes its threads by the CPU's core count, which crashes or hangs the
+ * multi-threaded core (https://github.com/ffmpegwasm/ffmpeg.wasm/issues/597):
+ * - `-threads 4` limits the encoder. libx264 otherwise picks 1.5 threads per core, and from 6
+ *   threads it also uses 2 lookahead threads, which crash the core with "function signature
+ *   mismatch". With 16 threads it hangs instead.
+ * - `-filter_threads` and `-filter_complex_threads` limit filters (e.g. scaling, or GIF's
+ *   palette). With 16 filter threads FFmpeg hangs, even with the encoder limited. They're
+ *   global options, so they apply wherever they are.
+ * The decoder is left alone: 16 decoder threads caused no problems.
+ * Firefox is left out.
  */
 export const videoThreadArgs = (): string[] =>
-  canUseThreads() && !navigator.userAgent.toLowerCase().includes('firefox') ? ['-threads', '4'] : [];
+  canUseThreads() && !navigator.userAgent.toLowerCase().includes('firefox')
+    ? ['-threads', '4', '-filter_threads', '4', '-filter_complex_threads', '4']
+    : [];
 
 /** Build the arguments for manual mode, where the user types everything after `ffmpeg -i <input>`. */
 export const manualCommandArgs = (inputFilename: string, command: string) => {
@@ -31,7 +42,7 @@ export const manualCommandArgs = (inputFilename: string, command: string) => {
   if (restOfArgs.length === 0) throw new Error('Please enter the rest of the command.');
 
   // Directly after the input, -threads is always an option of the first output,
-  // whatever the user's command ends with.
+  // whatever the user's command ends with. The user's own thread options come later, so they win.
   const encodesVideo = restOfArgs.some(arg => ['-c:v', '-c:V', '-codec:v', '-vcodec'].includes(arg));
   const threads = encodesVideo ? videoThreadArgs() : [];
 

@@ -28,6 +28,8 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ENCODERS = [
   { name: 'gif', args: ['-c:v', 'gif', '-vf', 'fps=15,scale=480:-2,split[a][b];[a]palettegen=stats_mode=single[p];[b][p]paletteuse=new=1'], out: 'out.gif' },
   { name: 'libx264', args: ['-c:v', 'libx264', '-crf', '23', '-preset', 'veryfast', '-pix_fmt', 'yuv420p'], out: 'out.mp4' },
+  // The same x264 library, and it crashes without -threads 4 in the same way.
+  { name: 'libx264rgb', args: ['-c:v', 'libx264rgb', '-qp', '0', '-preset', 'veryfast'], out: 'out.mkv' },
   { name: 'libx265', args: ['-c:v', 'libx265', '-crf', '28', '-preset', 'veryfast', '-pix_fmt', 'yuv420p'], out: 'out.mp4' },
   { name: 'libvpx-vp9', args: ['-c:v', 'libvpx-vp9', '-crf', '31', '-b:v', '0', '-deadline', 'good', '-cpu-used', '4', '-pix_fmt', 'yuv420p'], out: 'out.webm' },
   { name: 'libvpx', args: ['-c:v', 'libvpx', '-crf', '10', '-b:v', '20M', '-pix_fmt', 'yuv420p'], out: 'out.webm' },
@@ -141,6 +143,10 @@ try {
     for (let round = 0; round < Number(options.rounds); round++) {
       for (const withThreads of [true, false]) {
         const args = ['-i', inputName, ...(withThreads ? ['-threads', '4'] : []), '-map', '0:V:0', '-an', ...encoder.args, encoder.out];
+        // A fresh page for each run: after about 50 runs in one page, loading the core starts
+        // failing with "Failed to fetch".
+        await page.goto(url);
+        await page.waitForFunction(() => window.ready === true);
         const result = await page.evaluate(([a, o, t]) => window.convert(a, o, t), [args, encoder.out, timeoutMs]);
         const key = withThreads ? 'withThreads' : 'withoutThreads';
         results[encoder.name][key].push(result);
