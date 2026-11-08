@@ -168,12 +168,18 @@ const Homepage = (): React.JSX.Element => {
   // The selected file's audio tracks, once ffprobe has read it.
   const audioStreams = mediaInfo?.status === 'ready'
     ? mediaInfo.info.streams.filter(stream => stream.type === 'audio') : [];
+  // False when ffprobe found no video stream: then "Keep the video" isn't offered and the
+  // conversion behaves as if "I want an audio file" is selected.
+  const hasVideoStream = !(mediaInfo?.status === 'ready' && !mediaInfo.info.streams.some(stream => stream.type === 'video'));
+  const keepsVideo = Boolean(format.keepVideo && settings.isKeepVideo && hasVideoStream);
+  // Settings with that applied, for working out the arguments.
+  const effectiveSettings = hasVideoStream || !settings.isKeepVideo ? settings : { ...settings, isKeepVideo: false };
   // Whether the output can hold every audio track (MKA, or when keeping the video).
-  const allowsAll = allowsAllAudioTracks(codec, settings);
+  const allowsAll = allowsAllAudioTracks(codec, effectiveSettings);
   // Keeping the video makes the output about as large as the input, and the converted file is
   // held in memory until it's saved (about twice over at the peak), so warn when it's large
   // for this device's memory.
-  const largeForDevice = !manualMode && !isVideo && file !== undefined && Boolean(format.keepVideo && settings.isKeepVideo)
+  const largeForDevice = !manualMode && !isVideo && file !== undefined && keepsVideo
     && deviceMemoryGB !== undefined && file.size > deviceMemoryGB * 1024 ** 3 / 4;
   // The audio track that will be converted: the user's choice, else all tracks for MKA and the
   // first track for every other format. "All" falls back to the first track if the user then
@@ -181,8 +187,7 @@ const Homepage = (): React.JSX.Element => {
   const audioTrack: AudioTrack = chosenTrack === 'all' && !allowsAll ? 0
     : chosenTrack ?? (!isVideo && format.allAudioTracks ? 'all' : 0);
   // Whether to offer trimming: for video outputs, unless ffprobe found no video in the file.
-  const offersTrim = isVideo && file !== undefined
-    && !(mediaInfo?.status === 'ready' && !mediaInfo.info.streams.some(stream => stream.type === 'video'));
+  const offersTrim = isVideo && file !== undefined && hasVideoStream;
   // The steps after "Pick a format" move down one when the Trim step is shown.
   const afterTrim = offersTrim ? 1 : 0;
   // Whether there's audio in the output to pick a track for.
@@ -264,7 +269,7 @@ const Homepage = (): React.JSX.Element => {
         ? manualCommandArgs(file.name, manualCommandInput)
         : isVideo
           ? createVideoArgs(file.name, settings, outputName.trim(), audioTrack, videoThreadArgs(), offersTrim ? trim ?? undefined : undefined)
-          : createFFmpegArgs(file.name, codec, settings, outputName.trim(), audioTrack));
+          : createFFmpegArgs(file.name, codec, effectiveSettings, outputName.trim(), audioTrack));
     } catch (error) {
       setAlert({ severity: 'error', message: (error as Error).message });
       return;
@@ -424,7 +429,7 @@ const Homepage = (): React.JSX.Element => {
 
                 {/* Options every format shares, shown only where they apply. */}
                 {/* Keep the input's video: only for formats that can go into a video file (keepVideo). */}
-                {!isVideo && format.keepVideo && (
+                {!isVideo && format.keepVideo && hasVideoStream && (
                   <div>
                     <YesNoRadio name="keep_video" label="Output" value={settings.isKeepVideo}
                       onChange={value => update('isKeepVideo', value)}
