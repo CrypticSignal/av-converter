@@ -1,6 +1,10 @@
-# Audio/video converter
+# AV converter
+
+<div align="center">
 
 Try this web app at https://av-converter.com
+
+</div>
 
 <div align="center">
   <img src="https://img.shields.io/badge/Node.js-0F9A41?style=for-the-badge&logo=node&color=black" alt="Node.js" />
