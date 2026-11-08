@@ -1,0 +1,125 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: av-converter <av-converter@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 03:47:13 +0000
+Subject: [PATCH 2/3] Build SVT-AV1 to encode AV1 in the multi-threaded core
+
+SVT-AV1 1.2.1 is built as an encoder library in portable C, and enabled with
+--enable-libsvtav1 in the multi-threaded core only: it always encodes with
+threads, and doesn't link without them (pthread_setschedparam).
+
+Its build script changes two things for WebAssembly:
+- It removes -fstack-protector-strong, as Emscripten has no stack protector
+  (__stack_chk_guard is undefined).
+- It corrects three declarations that say a function returns void when it is
+  defined returning EbErrorType. Native code tolerates that, but in WebAssembly
+  a call through the wrong signature traps. The callers ignore the result.
+
+With more than one logical processor (-svtav1-params lp=1), SVT-AV1 starts
+more threads than the core's pool of 32 web workers and waits forever at the
+first frame, so it must be run with lp=1.
+---
+ Dockerfile      | 17 ++++++++++++++---
+ build/svtav1.sh | 42 ++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 56 insertions(+), 3 deletions(-)
+ create mode 100644 build/svtav1.sh
+
+diff --git a/Dockerfile b/Dockerfile
+index 844c84a..df387e8 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -143,6 +143,14 @@ ADD https://github.com/videolan/dav1d.git#$DAV1D_BRANCH /src
+ COPY build/dav1d.sh /src/build.sh
+ RUN bash -x /src/build.sh
+ 
++# Build SVT-AV1 (AV1 encoder). Like dav1d, it has its own stage for caching.
++FROM emsdk-base AS svtav1-builder
++# Fetch SVT-AV1 at the v1.2.1 release tag, from its own GitLab project.
++ENV SVTAV1_BRANCH=v1.2.1
++ADD https://gitlab.com/AOMediaCodec/SVT-AV1.git#$SVTAV1_BRANCH /src
++COPY build/svtav1.sh /src/build.sh
++RUN bash -x /src/build.sh
++
+ # Base ffmpeg image with dependencies and source code populated.
+ FROM emsdk-base AS ffmpeg-base
+ RUN embuilder build sdl2 sdl2-mt
+@@ -158,6 +166,7 @@ COPY --from=libwebp-builder $INSTALL_DIR $INSTALL_DIR
+ COPY --from=libass-builder $INSTALL_DIR $INSTALL_DIR
+ COPY --from=zimg-builder $INSTALL_DIR $INSTALL_DIR
+ COPY --from=dav1d-builder $INSTALL_DIR $INSTALL_DIR
++COPY --from=svtav1-builder $INSTALL_DIR $INSTALL_DIR
+ 
+ # Build ffmpeg
+ FROM ffmpeg-base AS ffmpeg-builder
+@@ -177,7 +186,8 @@ RUN bash -x /src/build.sh \
+       --enable-libfribidi \
+       --enable-libass \
+       --enable-libzimg \
+-      --enable-libdav1d
++      --enable-libdav1d \
++      ${FFMPEG_MT:+--enable-libsvtav1}
+ 
+ # Build ffmpeg.wasm
+ FROM ffmpeg-builder AS ffmpeg-wasm-builder
+@@ -206,11 +216,12 @@ ENV FFMPEG_LIBS \
+       -lass \
+       -lzimg \
+       -ldav1d
++# SVT-AV1 needs threads, so it's only linked into the multi-threaded core.
+ RUN mkdir -p /src/dist/umd && bash -x /src/build.sh \
+-      ${FFMPEG_LIBS} \
++      ${FFMPEG_LIBS} ${FFMPEG_MT:+-lSvtAv1Enc} \
+       -o dist/umd/ffmpeg-core.js
+ RUN mkdir -p /src/dist/esm && bash -x /src/build.sh \
+-      ${FFMPEG_LIBS} \
++      ${FFMPEG_LIBS} ${FFMPEG_MT:+-lSvtAv1Enc} \
+       -sEXPORT_ES6 \
+       -o dist/esm/ffmpeg-core.js
+ 
+diff --git a/build/svtav1.sh b/build/svtav1.sh
+new file mode 100644
+index 0000000..526bb88
+--- /dev/null
++++ b/build/svtav1.sh
+@@ -0,0 +1,42 @@
++#!/bin/bash
++# SVT-AV1 (AV1 encoder), encoder library only, in portable C (its assembly is x86/Arm only).
++# It always encodes with threads, so FFmpeg only uses it in the multi-threaded core.
++
++set -euo pipefail
++
++# CMake options. The build is only the encoder library, which is all FFmpeg links against.
++CM_FLAGS=(
++  -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR      # install under $INSTALL_DIR, where FFmpeg's configure looks
++  -DCMAKE_TOOLCHAIN_FILE=$EM_TOOLCHAIN_FILE  # use Emscripten's compilers
++  -DCMAKE_BUILD_TYPE=Release               # optimised, without debug info
++  -DBUILD_SHARED_LIBS=OFF                  # a static .a file, which is linked into FFmpeg's core
++  -DBUILD_APPS=OFF                         # no command-line programs
++  -DBUILD_DEC=OFF                          # no decoder: dav1d decodes AV1
++  -DBUILD_TESTING=OFF                      # no tests
++  -DCOMPILE_C_ONLY=ON                      # portable C only, with no assembly (it's x86/Arm only)
++)
++
++# Emscripten has no stack protector (__stack_chk_guard), which SVT-AV1 turns on. This removes
++# the flag from SVT-AV1's CMake file, so the build doesn't need that symbol.
++sed -i '/check_both_flags_add(-fstack-protector-strong)/d' CMakeLists.txt
++
++# Three functions are declared returning void in one file but defined returning EbErrorType
++# in another. Native code tolerates that, but in WebAssembly a call through the wrong
++# signature traps, so declare them as defined. (Their callers ignore the result.)
++sed -i 's/^void                 rtime_alloc_palette_info(/EbErrorType rtime_alloc_palette_info(/' \
++  Source/Lib/Encoder/Codec/EbCodingLoop.c
++sed -i 's/^void ssim_calculations(/EbErrorType ssim_calculations(/' \
++  Source/Lib/Encoder/Codec/EbPacketizationProcess.c
++sed -i 's/^void rtime_alloc_palette_tokens(/EbErrorType rtime_alloc_palette_tokens(/' \
++  Source/Lib/Encoder/Codec/EbPictureManagerProcess.c
++# Fail if any of them didn't apply (e.g. after a version change).
++grep -q '^EbErrorType rtime_alloc_palette_info(' Source/Lib/Encoder/Codec/EbCodingLoop.c
++grep -q '^EbErrorType ssim_calculations(' Source/Lib/Encoder/Codec/EbPacketizationProcess.c
++grep -q '^EbErrorType rtime_alloc_palette_tokens(' Source/Lib/Encoder/Codec/EbPictureManagerProcess.c
++
++rm -rf cmbuild
++emmake cmake -S . -B cmbuild \
++  -DCMAKE_C_FLAGS="$CFLAGS" \
++  -DCMAKE_CXX_FLAGS="$CXXFLAGS" \
++  ${CM_FLAGS[@]}
++emmake make -C cmbuild install -j

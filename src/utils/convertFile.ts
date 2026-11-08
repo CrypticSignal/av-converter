@@ -156,6 +156,8 @@ export interface ConversionJob {
   outputFilename: string;
   /** False when the arguments may change the output's duration, so a percentage would mislead. */
   knownTimeline: boolean;
+  /** The output's length in seconds when it isn't the input's (e.g. when trimmed). */
+  outputDuration?: number;
   /** Turns false once the job is cancelled or the page unmounts; nothing is reported after that. */
   isActive: () => boolean;
   onAlert: (severity: AlertColor, message: string) => void;
@@ -184,7 +186,7 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
 };
 
 const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, isRetry: boolean): Promise<'retry single-threaded' | void> => {
-  const { file, ffmpegArgs, outputFilename, knownTimeline, isActive, onAlert, onStatus, onLog, onOutput } = job;
+  const { file, ffmpegArgs, outputFilename, knownTimeline, outputDuration, isActive, onAlert, onStatus, onLog, onOutput } = job;
   const inputFilename = file.name;
   let retry = false;
   // Whether the multi-threaded core failed to start just now, so the single-threaded one is used.
@@ -196,7 +198,7 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, isRetry: boolean)
    * to about 2 GB. Files, including the output, are held outside that memory.
    */
   let execCrashed = false;
-  let duration: number | undefined;
+  let duration: number | undefined = knownTimeline ? outputDuration : undefined;
   let started: number | undefined;
   // FFmpeg's first error line is usually the root cause; later ones are consequences.
   let firstError: string | undefined;
@@ -209,7 +211,7 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, isRetry: boolean)
       firstError = message.trim().slice(0, 300);
     }
     const match = message.match(/Duration: (\d+):(\d+):(\d+(?:\.\d+)?)/);
-    if (knownTimeline && match) {
+    if (knownTimeline && outputDuration === undefined && match) {
       const seconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
       if (seconds > 0) duration = seconds;
     }

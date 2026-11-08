@@ -18,17 +18,22 @@ const checkManualOutputFilename = (name: string, hasFormatOption: boolean) => {
   }
 };
 
+/**
+ * Encoding video with multi-threaded FFmpeg needs an explicit thread count, or it can hang:
+ * https://github.com/ffmpegwasm/ffmpeg.wasm/issues/597. Firefox is left out.
+ */
+export const videoThreadArgs = (): string[] =>
+  canUseThreads() && !navigator.userAgent.toLowerCase().includes('firefox') ? ['-threads', '4'] : [];
+
 /** Build the arguments for manual mode, where the user types everything after `ffmpeg -i <input>`. */
 export const manualCommandArgs = (inputFilename: string, command: string) => {
   const restOfArgs = parseArgs(command);
   if (restOfArgs.length === 0) throw new Error('Please enter the rest of the command.');
 
-  // https://github.com/ffmpegwasm/ffmpeg.wasm/issues/597
   // Directly after the input, -threads is always an option of the first output,
   // whatever the user's command ends with.
   const encodesVideo = restOfArgs.some(arg => ['-c:v', '-c:V', '-codec:v', '-vcodec'].includes(arg));
-  const threads = encodesVideo && canUseThreads() && !navigator.userAgent.toLowerCase().includes('firefox')
-    ? ['-threads', '4'] : [];
+  const threads = encodesVideo ? videoThreadArgs() : [];
 
   const ffmpegArgs = ['-i', inputFilename, ...threads, ...restOfArgs];
   const outputFilename = ffmpegArgs[ffmpegArgs.length - 1];

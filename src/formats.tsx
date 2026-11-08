@@ -32,6 +32,43 @@ export interface FormatSettings {
   vorbisEncodingType: string;
   vorbisQuality: string;
   wavBitDepth: string;
+
+  // The "Video" output type (see videoEncoders.tsx).
+  /** 'audio' converts to one of FORMATS; 'video' re-encodes the video with one of VIDEO_ENCODERS. */
+  outputType: 'audio' | 'video';
+  videoEncoder: string;
+  /** The container's extension, e.g. 'mp4'. Ignored if the encoder can't be written to it. */
+  videoContainer: string;
+  /** What happens to the audio: re-encoded to suit the container, copied as it is, or left out. */
+  videoAudio: 'encode' | 'copy' | 'none';
+  /** The audio format when the audio is re-encoded (see VIDEO_AUDIO_FORMATS). Ignored if the container can't hold it. */
+  videoAudioFormat: string;
+  /** 'original', or frames per second. */
+  videoFps: string;
+  /** 'original', or pixels. With only one of width and height set, the other keeps the aspect ratio. */
+  videoWidth: string;
+  videoHeight: string;
+  wmaBitrate: string;
+  mp2Bitrate: string;
+  x264Crf: string;
+  x264Preset: string;
+  x265Crf: string;
+  x265Preset: string;
+  av1Crf: string;
+  av1Preset: string;
+  aomCrf: string;
+  aomSpeed: string;
+  vpxCrf: string;
+  vp8Crf: string;
+  vpxSpeed: string;
+  theoraQuality: string;
+  webpQuality: string;
+  proresProfile: string;
+  dnxhrProfile: string;
+  /** -q:v for FFmpeg's own MPEG-style encoders. */
+  videoQscale: string;
+  /** In kbps, for encoders whose quality depends only on the bitrate. */
+  videoBitrate: string;
 }
 
 export const DEFAULT_SETTINGS: FormatSettings = {
@@ -50,6 +87,33 @@ export const DEFAULT_SETTINGS: FormatSettings = {
   vorbisEncodingType: 'abr',
   vorbisQuality: '6',
   wavBitDepth: '16',
+  outputType: 'audio',
+  videoEncoder: 'libx264',
+  videoContainer: 'mp4',
+  videoAudio: 'encode',
+  videoAudioFormat: 'AAC',
+  videoFps: 'original',
+  videoWidth: 'original',
+  videoHeight: 'original',
+  wmaBitrate: '192',
+  mp2Bitrate: '224',
+  x264Crf: '23',
+  x264Preset: 'veryfast',
+  x265Crf: '28',
+  x265Preset: 'veryfast',
+  av1Crf: '35',
+  av1Preset: '10',
+  aomCrf: '32',
+  aomSpeed: '8',
+  vpxCrf: '31',
+  vp8Crf: '10',
+  vpxSpeed: '4',
+  theoraQuality: '7',
+  webpQuality: '75',
+  proresProfile: '2',
+  dnxhrProfile: 'dnxhr_hq',
+  videoQscale: '3',
+  videoBitrate: '5000',
 };
 
 /** Changes one setting, e.g. set('mp3Bitrate', '256'). */
@@ -67,6 +131,8 @@ interface Format {
   keepVideo?: 'mp4' | 'mkv';
   /** Set when the audio is copied unchanged, so it can't be downmixed to stereo. */
   copiesAudio?: true;
+  /** Set when the format can't hold more than two channels, so audio with more is always downmixed. */
+  stereoOnly?: true;
   /** Set when the format keeps every audio track unless the user picks one. */
   allAudioTracks?: true;
   /**
@@ -163,6 +229,7 @@ export const FORMATS: Record<Codec, Format> = {
   MP3: {
     label: 'MP3 (.mp3)',
     extension: '.mp3',
+    stereoOnly: true,
     keepVideo: 'mp4',
     args: s => {
       if (s.mp3EncodingType === 'vbr') return ['-c:a', 'libmp3lame', '-q:a', s.mp3VbrSetting];
