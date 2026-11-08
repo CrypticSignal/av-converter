@@ -181,5 +181,9 @@ export const createFFmpegArgs = (
   if (!format.copiesAudio) args.push(...downmixArgs(format.stereoOnly, settings.downmixToStereo));
 
   const outputFilename = sanitizeFilename(outputName) + extension;
-  return { ffmpegArgs: ['-i', inputFilename, ...args, outputFilename], outputFilename };
+  // MKV refuses video packets without a PTS. Inputs from containers that don't need one (e.g.
+  // MPEG-PS, or AVI with B-frames) can lack them, so make the missing ones up. Containers that
+  // keep the input's own container have no such problem.
+  const input = keepVideo && extension === '.mkv' ? ['-fflags', '+genpts', '-i', inputFilename] : ['-i', inputFilename];
+  return { ffmpegArgs: [...input, ...args, outputFilename], outputFilename };
 };
