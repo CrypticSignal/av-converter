@@ -1,10 +1,8 @@
-import Typography from '@mui/material/Typography';
-
 /** A short explanation shown under an encoder setting. */
 const SettingNote = ({ children }: { children: React.ReactNode }) => (
-  <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 560, mx: 'auto', my: 1 }}>
+  <p className="mx-auto my-2 max-w-140 text-sm leading-relaxed text-slate-400">
     {children}
-  </Typography>
+  </p>
 );
 
 export default SettingNote;

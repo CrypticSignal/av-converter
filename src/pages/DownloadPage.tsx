@@ -1,5 +1,8 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { Alert, Box, Button, Container, MenuItem, TextField } from '@mui/material';
+import Alert from '../components/Alert';
+import Button from '../components/Button';
+import SelectField from '../components/SelectField';
+import TextField from '../components/TextField';
 import OperationStatus from '../components/OperationStatus';
 import { downloadProgress, OperationProgress } from '../utils/progress';
 import { downloadFile } from '../utils/downloadFile';
@@ -131,30 +134,28 @@ export default function DownloadPage() {
   }
 
   return (
-    <Container maxWidth="sm" sx={{ py: 6 }}>
+    <div className="mx-auto max-w-xl py-12">
       <header className="pb-8">
         <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
           <span className="gradient-text">Video</span> Downloader
         </h1>
         <p className="mt-3 text-slate-400">Paste a link and pick what you want to keep.</p>
       </header>
-      <Box className="glass-card float-in rounded-3xl p-5 sm:p-8 text-left" component="form" onSubmit={download} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <TextField name="password" label="Password" type="password" required fullWidth value={password}
+      <form className="glass-card float-in flex flex-col gap-4 rounded-3xl p-5 text-left sm:p-8" onSubmit={download}>
+        <TextField name="password" label="Password" type="password" required value={password}
           disabled={busy} onChange={event => setPassword(event.target.value)}
-          slotProps={{ htmlInput: { autoComplete: 'current-password', maxLength: 1024 } }} />
-        <TextField name="url" label="Video URL" type="url" required fullWidth value={url}
+          autoComplete="current-password" maxLength={1024} />
+        <TextField name="url" label="Video URL" type="url" required value={url}
           disabled={busy} onChange={event => setUrl(event.target.value)}
-          placeholder="https://www.youtube.com/watch?v=..." slotProps={{ htmlInput: { maxLength: 2048 } }} />
-        {url.trim() && <TextField name="format" select label="Download type" value={downloadType}
-          disabled={busy} onChange={event => setDownloadType(event.target.value)}
-          helperText={DOWNLOAD_TYPES.find(type => type.value === downloadType)?.description}>
-          {DOWNLOAD_TYPES.map(type => <MenuItem key={type.value} value={type.value}>{type.label}</MenuItem>)}
-        </TextField>}
-        <Button type="submit" variant="contained" size="large" sx={{ py: 1.4 }} disabled={busy || !url.trim() || !password}>
+          placeholder="https://www.youtube.com/watch?v=..." maxLength={2048} />
+        {url.trim() && <SelectField id="format" label="Download type" value={downloadType} fullWidth
+          disabled={busy} onChange={setDownloadType}
+          helperText={DOWNLOAD_TYPES.find(type => type.value === downloadType)?.description}
+          options={DOWNLOAD_TYPES.map(type => [type.value, type.label] as const)} />}
+        <Button type="submit" className="mt-1 py-3" disabled={busy || !url.trim() || !password}>
           {busy ? 'Preparing download…' : 'Download'}
         </Button>
-        {busy && <Button type="button" variant="outlined" color="inherit" onClick={cancel}
-          sx={{ borderColor: 'rgba(255,255,255,0.2)', color: 'text.secondary' }}>Cancel</Button>}
+        {busy && <Button variant="outline" onClick={cancel}>Cancel</Button>}
         <OperationStatus progress={status} busy={busy} logs={output} />
         {error && <Alert severity="error">{error}</Alert>}
         {result && <Alert severity="success">
@@ -162,10 +163,10 @@ export default function DownloadPage() {
           {' '}If it didn’t, <a href={result.url} download={result.filename} className="underline">click here to download</a>.
           {' '}This link will expire in 10 minutes.
         </Alert>}
-      </Box>
-      <Alert severity="warning" sx={{ mt: 3, textAlign: 'left' }}>
+      </form>
+      <Alert severity="warning" className="mt-6">
         You can switch to another tab while a download is in progress, but keep this page/tab open.
       </Alert>
-    </Container>
+    </div>
   );
 }

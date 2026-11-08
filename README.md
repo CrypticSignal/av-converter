@@ -10,7 +10,6 @@ Convert audio and video files right in your browser using FFmpeg and WebAssembly
   <img src="https://img.shields.io/badge/React-000000?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React" />
   <img src="https://img.shields.io/badge/TypeScript-000000?style=for-the-badge&logo=typescript&logoColor=3178C6" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Vite-000000?style=for-the-badge&logo=vite&logoColor=A78BFA" alt="Vite" />
-  <img src="https://img.shields.io/badge/Material%20UI-000000?style=for-the-badge&logo=mui&logoColor=007FFF" alt="Material UI" />
   <img src="https://img.shields.io/badge/Tailwind-000000?style=for-the-badge&logo=tailwind-css&logoColor=38B2AC" alt="Tailwind" />
   <img src="https://img.shields.io/badge/Python-000000?style=for-the-badge&logo=python&logoColor=3776AB" alt="Python" />
   <img src="https://img.shields.io/badge/WebAssembly-000000?style=for-the-badge&logo=webassembly&logoColor=654FF0" alt="WebAssembly" />

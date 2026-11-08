@@ -5,8 +5,8 @@
  * (e.g. HEVC in some browsers); the slider still works then, using ffprobe's duration.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Button from '@mui/material/Button';
-import Slider from '@mui/material/Slider';
+import Button from './Button';
+import Slider from './Slider';
 import type { Trim } from '../utils/createFFmpegArgs';
 import SettingNote from './SettingNote';
 
@@ -96,24 +96,22 @@ const VideoTrimmer = ({ file, duration: probedDuration, probeFailed, trim, onCha
       )}
 
       {duration ? <>
-        <Slider
-          aria-label="Part to convert"
-          getAriaLabel={index => (index === 0 ? 'Start' : 'End')}
-          value={[start, end]}
-          min={0}
-          max={duration}
-          step={0.01}
-          disableSwap
-          valueLabelDisplay="auto"
-          valueLabelFormat={formatTime}
-          getAriaValueText={formatTime}
-          onChange={(_, value, activeThumb) => {
-            const [newStart, newEnd] = value as number[];
-            set(newStart, newEnd);
-            seek(activeThumb === 0 ? newStart : newEnd);
-          }}
-          sx={{ mt: 2 }}
-        />
+        <div role="group" aria-label="Part to convert" className="mt-8 mb-2 px-2">
+          <Slider
+            getAriaLabel={index => (index === 0 ? 'Start' : 'End')}
+            value={[start, end] as const}
+            min={0}
+            max={duration}
+            step={0.01}
+            // Page Up/Down move a handle a tenth of the video.
+            largeStep={duration / 10}
+            formatValue={formatTime}
+            onChange={([newStart, newEnd], activeThumb) => {
+              set(newStart, newEnd);
+              seek(activeThumb === 0 ? newStart : newEnd);
+            }}
+          />
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-300">
           <span>
             Start <strong className="font-mono">{formatTime(start)}</strong>
@@ -122,10 +120,10 @@ const VideoTrimmer = ({ file, duration: probedDuration, probeFailed, trim, onCha
           </span>
           <span className="flex flex-wrap gap-1">
             {!previewFailed && <>
-              <Button size="small" onClick={() => set(video.current?.currentTime ?? 0, end)}>Set start here</Button>
-              <Button size="small" onClick={() => set(start, video.current?.currentTime ?? end)}>Set end here</Button>
+              <Button variant="text" onClick={() => set(video.current?.currentTime ?? 0, end)}>Set start here</Button>
+              <Button variant="text" onClick={() => set(start, video.current?.currentTime ?? end)}>Set end here</Button>
             </>}
-            <Button size="small" disabled={!trim} onClick={() => onChange(null)}>Reset</Button>
+            <Button variant="text" disabled={!trim} onClick={() => onChange(null)}>Reset</Button>
           </span>
         </div>
       </> : (

@@ -1,6 +1,5 @@
 import React, { useState } from "react";
-import Button from "@mui/material/Button";
-import { styled } from "@mui/material/styles";
+import { BUTTON_CLASSES } from "./Button";
 
 interface FileInputProps {
   /** Called with the chosen or dropped file. */
@@ -8,18 +7,6 @@ interface FileInputProps {
   filename: string;
   disabled?: boolean;
 }
-
-const VisuallyHiddenInput = styled("input")({
-  clip: "rect(0 0 0 0)",
-  clipPath: "inset(50%)",
-  height: 1,
-  overflow: "hidden",
-  position: "absolute",
-  bottom: 0,
-  left: 0,
-  whiteSpace: "nowrap",
-  width: 1,
-});
 
 // Any audio or video type, plus extensions browsers often don't map to one.
 const ACCEPT = [
@@ -69,16 +56,17 @@ const FileInput: React.FC<FileInputProps> = ({ onFile, filename, disabled = fals
           </svg>
         )}
       </div>
-      <Button
-        disabled={disabled}
-        component="label"
-        role={undefined}
-        variant="contained"
-        tabIndex={-1}
-        sx={{ maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block" }}
+      {/* A label styled as a button, around the real (visually hidden) file input, which
+          stays focusable: the outline shows on the label while the input has keyboard focus. */}
+      <label
+        className={`${BUTTON_CLASSES.primary} max-w-full cursor-pointer
+          has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-violet-400
+          has-disabled:cursor-not-allowed has-disabled:bg-none has-disabled:bg-white/10 has-disabled:text-white/40
+          has-disabled:shadow-none has-disabled:hover:translate-y-0 has-disabled:hover:brightness-100`}
       >
-        {filename || "Choose a file"}
-        <VisuallyHiddenInput
+        <span className="truncate">{filename || "Choose a file"}</span>
+        <input
+          className="sr-only"
           disabled={disabled}
           accept={ACCEPT}
           type="file"
@@ -88,7 +76,7 @@ const FileInput: React.FC<FileInputProps> = ({ onFile, filename, disabled = fals
             e.currentTarget.value = "";
           }}
         />
-      </Button>
+      </label>
       <p className="text-sm text-slate-400 mt-3">
         {dragging ? "Drop to select this file" : filename ? "Click to choose another file, or drop one here" : "or drag and drop any audio or video file here"}
       </p>

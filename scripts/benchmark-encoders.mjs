@@ -107,14 +107,14 @@ const run = async (browser, encoder) => {
     await page.getByLabel('Write my own FFmpeg command').check();
     await page.fill('#manual_command', `-an ${encoder.args} output.mkv`);
     const download = page.waitForEvent('download', { timeout: timeoutMs });
-    const failed = page.locator('.MuiAlert-standardError').first().waitFor({ timeout: timeoutMs });
+    const failed = page.locator('[data-severity=error]').first().waitFor({ timeout: timeoutMs });
     const started = performance.now();
     await page.getByRole('button', { name: 'Convert', exact: true }).click();
     const outcome = await Promise.race([download, failed.then(() => null)]).catch(() => undefined);
     const seconds = ((performance.now() - started) / 1000).toFixed(1);
     if (outcome === undefined) return { result: `timed out after ${seconds} s` };
     if (outcome === null) {
-      const message = await page.locator('.MuiAlert-standardError').first().textContent();
+      const message = await page.locator('[data-severity=error]').first().textContent();
       return { result: `failed: ${message.slice(0, 100)}` };
     }
     const path = await outcome.path();

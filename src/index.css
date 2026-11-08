@@ -2,6 +2,10 @@
 
 @theme {
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* The page background and the card surface, also used behind dropdown options. */
+  --color-ink: #070a13;
+  --color-surface: #0f1424;
 }
 
 html { color-scheme: dark; }
@@ -71,9 +75,70 @@ body {
 }
 
 code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.9em;
   padding: 0.1em 0.35em;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.08);
+}
+
+/* Text inputs and selects. */
+@utility field {
+  width: 100%;
+  border-radius: var(--radius-xl);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  background-color: rgb(255 255 255 / 0.03);
+  padding: 0.5rem 0.875rem;
+  color: var(--color-slate-100);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  &::placeholder { color: var(--color-slate-500); }
+  &:hover:not(:disabled) { border-color: rgb(167 139 250 / 0.6); }
+  &:focus { outline: none; border-color: var(--color-violet-400); box-shadow: 0 0 0 4px rgb(139 92 246 / 0.2); }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+}
+
+/* A native select with its own chevron, so it matches on every platform. */
+@utility field-select {
+  appearance: none;
+  cursor: pointer;
+  padding-right: 2.25rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239aa3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1rem;
+  & option, & optgroup { background-color: var(--color-surface); color: var(--color-slate-100); }
+}
+
+/* A checkbox drawn to match the theme. */
+@utility checkbox {
+  appearance: none;
+  flex-shrink: 0;
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: 0.3rem;
+  border: 1.5px solid var(--color-slate-500);
+  background-color: rgb(255 255 255 / 0.03);
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+  &:hover:not(:disabled) { border-color: var(--color-violet-400); }
+  &:checked {
+    border-color: transparent;
+    background-color: var(--color-violet-500);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+    background-size: 0.8rem;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+  &:focus-visible { outline: 2px solid var(--color-violet-400); outline-offset: 2px; }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+}
+
+@keyframes indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+.progress-indeterminate { animation: indeterminate 1.4s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-indeterminate { animation-duration: 3s; }
 }
