@@ -404,7 +404,7 @@ const Homepage = (): React.JSX.Element => {
           <span className="gradient-text">Audio / Video</span> Converter
         </h1>
         <p className="mt-4 text-slate-400 max-w-lg mx-auto">
-          Convert audio and video right in your browser. Fast, private, and nothing is uploaded.
+          Convert audio and video right in your browser. Fast, private, and your file is not uploaded.
         </p>
         <div className="mt-5 flex items-center justify-center gap-2 text-xs">
           <a href="https://ffmpeg.org/" target="_blank" rel="noreferrer"
