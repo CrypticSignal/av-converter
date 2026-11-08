@@ -29,6 +29,8 @@ services:
       # setup.sh sets NGINX_CONF=nginx-http.conf for local mode and before a certificate exists.
       - ./${NGINX_CONF:-nginx.conf}:/etc/nginx/nginx.conf:ro
       - ./locations.conf:/etc/nginx/locations.conf:ro
+      - ./security-headers.conf:/etc/nginx/security-headers.conf:ro
+      - ./app-headers.conf:/etc/nginx/app-headers.conf:ro
       - ../../build:/usr/share/nginx/html:ro
       - ../../public/game:/game:ro
     depends_on:
@@ -50,6 +52,9 @@ services:
     build:
       context: ../../logging
     restart: unless-stopped
+    volumes:
+      # The IP location database, which the service downloads and keeps up to date.
+      - geoip_data:/app/data
     depends_on:
       - loki
 
@@ -77,4 +82,5 @@ volumes:
   certbot_webroot_path:
   ssl_certificate:
   loki_data:
+  geoip_data:
   grafana_data:

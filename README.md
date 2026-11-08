@@ -126,7 +126,7 @@ Locally, run `python3 set_password.py` too. The Docker setup picks the file up a
 
 ### Limits
 
-There's no limit on how many downloads run at once. Downloads have no file-size limit, and live recordings have no duration limit. A download stops if free disk space drops below 1 GiB.
+At most three downloads run at once (set `MAX_CONCURRENT_DOWNLOADS` to change it); further requests are refused until one finishes. In production, Nginx also lets each IP address start at most 10 downloads a minute (with a burst of 5), which limits password guessing. Downloads have no file-size limit, and live recordings have no duration limit. A download stops if free disk space drops below 1 GiB.
 
 A completed download is kept for up to ten minutes. Its link can be used once; the file is removed when that transfer ends, or when the link expires.
 
@@ -162,7 +162,13 @@ Run frontend tests:
 yarn test
 ```
 
-GitHub Actions runs both suites and the frontend build on every push to master and on pull requests.
+Lint the frontend with ESLint, including React's hooks rules:
+
+```sh
+yarn lint
+```
+
+GitHub Actions runs both suites, the linter and the frontend build on every push to master and on pull requests.
 
 ## Benchmarking encoders
 
@@ -193,8 +199,8 @@ In this benchmark libaom was faster than SVT-AV1 in the browser, which is why it
 | `src/pages/DownloadPage.tsx` | The video downloader page, which streams progress from the backend. |
 | `downloader/server.py` | The yt-dlp backend. |
 | `set_password.py` | Sets the downloader's password, saving its hash in `downloader-password.env`. |
-| `docker/prod/nginx.conf`, `nginx-http.conf` | Nginx for HTTPS, and HTTP only (local mode and first certificate). Both include `locations.conf`, the site's routes. |
-| `logging/index.ts` | Records page visits in Loki, viewable in Grafana at `/grafana/`. |
+| `docker/prod/nginx.conf`, `nginx-http.conf` | Nginx for HTTPS, and HTTP only (local mode and first certificate). Both include `locations.conf`, the site's routes, which adds the security headers in `security-headers.conf` and `app-headers.conf`. |
+| `logging/index.ts` | Records real visitors' page visits (path, approximate city and country, time zone, device model, platform and browser; not the IP address) in Loki, viewable in Grafana at `/grafana/`. IP geolocation by [DB-IP](https://db-ip.com). |
 | `vendor/ffmpeg-core/` | The multi-threaded and single-threaded FFmpeg WebAssembly cores, which Vite bundles as content-hashed assets. Pages that aren't cross-origin isolated (no SharedArrayBuffer) fall back to the single-threaded core. They're built from ffmpeg.wasm's source: the npm release's Opus encoder crashes, and it can't decode or encode AV1. Its README explains why and how to rebuild them. |
 | `vendor/ffmpeg-core/patches/` | The patches that add AV1 support to those cores, applied to ffmpeg.wasm when they're rebuilt. See its README. |
 

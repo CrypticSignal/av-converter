@@ -16,6 +16,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "lint": "eslint .",
     "benchmark": "node scripts/benchmark-encoders.mjs",
     "deploy": "python3 deploy.py",
     "docker-dev": "docker compose -f docker/dev/docker-compose.yml up --build --watch",
@@ -23,14 +24,20 @@
     "docker-down": "docker compose -f docker/prod/docker-compose.yml down"
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@typescript/typescript6": "6.0.2",
     "@vitejs/plugin-react": "^5.2.0",
+    "eslint": "10.14.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.14.0",
     "playwright": "1.63.0",
     "tailwindcss": "^4.1.7",
     "typescript": "^7.0.2",
+    "typescript-eslint": "8.72.1",
     "vite": "8.3.5",
     "vitest": "5.0.5"
   }

@@ -10,6 +10,7 @@ const checkManualOutputFilename = (name: string, hasFormatOption: boolean) => {
     throw new Error(`The command must end with the output filename (e.g. output.mp4), not the option ${name}.`);
   }
   if (/[/\\]/.test(name)) throw new Error(`The output filename ${name} can't include a folder.`);
+  // eslint-disable-next-line no-control-regex -- Control characters are what it rejects.
   if (/[:*?"<>|\u0000-\u001f]/.test(name)) {
     throw new Error(`The output filename ${name} contains characters that aren't allowed in filenames.`);
   }

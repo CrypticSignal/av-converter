@@ -37,9 +37,12 @@ const VideoTrimmer = ({ file, duration: probedDuration, probeFailed, trim, onCha
   // The file is played straight from disk through an object URL; nothing is copied.
   const url = useMemo(() => URL.createObjectURL(file), [file]);
   useEffect(() => () => URL.revokeObjectURL(url), [url]);
-  const [previewDuration, setPreviewDuration] = useState<number>();
-  const [previewFailed, setPreviewFailed] = useState(false);
-  useEffect(() => { setPreviewDuration(undefined); setPreviewFailed(false); }, [url]);
+  // What the preview found out: its duration, or that it can't play. It's kept with the URL
+  // it's about, so a newly chosen file starts with nothing known rather than the last one's.
+  const [preview, setPreview] = useState<{ url: string; duration?: number; failed?: boolean }>({ url });
+  const { duration: previewDuration, failed: previewFailed = false } = preview.url === url ? preview : {};
+  const updatePreview = (found: { duration?: number; failed?: boolean }) =>
+    setPreview(previous => ({ ...(previous.url === url ? previous : {}), url, ...found }));
 
   const duration = probedDuration ?? previewDuration;
   const start = trim?.start ?? 0;
@@ -72,9 +75,9 @@ const VideoTrimmer = ({ file, duration: probedDuration, probeFailed, trim, onCha
           className="w-full max-h-80 rounded-xl bg-black"
           onLoadedMetadata={event => {
             const value = event.currentTarget.duration;
-            if (Number.isFinite(value) && value > 0) setPreviewDuration(value);
+            if (Number.isFinite(value) && value > 0) updatePreview({ duration: value });
           }}
-          onError={() => setPreviewFailed(true)}
+          onError={() => updatePreview({ failed: true })}
           // Playing from before the start, or from the end, starts at the start.
           onPlay={event => {
             const element = event.currentTarget;

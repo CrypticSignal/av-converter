@@ -76,7 +76,10 @@ export default function DownloadPage() {
       if (!active()) { await response.body?.cancel().catch(() => undefined); return; }
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        throw new Error(body?.error || `Download service returned HTTP ${response.status}.`);
+        // Nginx answers 429 itself (with HTML) when an address tries too often; see locations.conf.
+        throw new Error(body?.error || (response.status === 429
+          ? 'Too many attempts. Please wait a minute and try again.'
+          : `Download service returned HTTP ${response.status}.`));
       }
       if (!response.body || !response.headers.get('Content-Type')?.includes('application/x-ndjson')) {
         throw new Error('The download service returned an unexpected response.');

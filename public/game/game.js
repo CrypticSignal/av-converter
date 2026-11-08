@@ -1,14 +1,16 @@
-// Report this visit to the logging service, which forwards it to Loki.
+// Report this visit to the logging service, which forwards it to Loki. Only the path and
+// device model are sent (see src/utils/logVisit.ts).
 (async function logVisit() {
+  // Only real visitors are logged: not automated browsers or crawlers (see src/utils/logVisit.ts).
+  if (navigator.webdriver || /bot|crawl|spider|slurp|headless|lighthouse|pagespeed|prerender|preview|scrape|fetch|curl|wget|python|java\/|go-http|axios|node-fetch|phantomjs|selenium|puppeteer|playwright|facebookexternalhit|embedly|bingpreview/i.test(navigator.userAgent)) return;
+
   let deviceModel = "Unknown Device";
-  let devicePlatform = "Unknown Platform";
 
   if (navigator.userAgentData) {
     try {
       // User-Agent Client Hints API
-      const highEntropy = await navigator.userAgentData.getHighEntropyValues(["model", "platform"]);
-      deviceModel = highEntropy.model || "Unknown Device";
-      devicePlatform = highEntropy.platform || "Unknown Platform";
+      const { model } = await navigator.userAgentData.getHighEntropyValues(["model"]);
+      deviceModel = model || "Unknown Device";
     } catch (e) {
       console.error(e);
     }
@@ -17,7 +19,11 @@
   fetch("/logging/visit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: location.pathname, deviceModel, devicePlatform }),
+    body: JSON.stringify({
+      path: location.pathname,
+      deviceModel,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }),
   }).catch((err) => console.error("Logging failed:", err));
 })();
 

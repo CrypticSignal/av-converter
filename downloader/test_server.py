@@ -1,6 +1,8 @@
 """Offline checks of the downloader's inputs and outputs. yt-dlp is never run."""
 import hashlib
+import io
 from pathlib import Path
+import threading
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -60,6 +62,35 @@ class PasswordTests(unittest.TestCase):
     def test_no_password_set_refuses_everything(self):
         with patch.object(server, 'PASSWORD_SHA256', ''):
             self.assertFalse(server.check_password(''))
+
+
+class ConcurrencyTests(unittest.TestCase):
+    def post(self):
+        """Send a valid download request to a handler, and return its HTTP status."""
+        body = b'password=secret&url=https%3A%2F%2Fyoutu.be%2Fabc'
+        handler = server.DownloadHandler.__new__(server.DownloadHandler)
+        handler.path = '/api/download'
+        handler.headers = Mock(get={'Content-Length': str(len(body))}.get,
+                               get_content_type=Mock(return_value='application/x-www-form-urlencoded'))
+        handler.rfile = io.BytesIO(body)
+        handler.error = Mock()
+        handler.download = Mock()
+        handler.do_POST()
+        return handler
+
+    def test_downloads_beyond_the_limit_are_refused(self):
+        self.enterContext(patch.object(server, 'PASSWORD_SHA256', hashlib.sha256(b'secret').hexdigest()))
+        self.enterContext(patch.object(server, 'DOWNLOAD_SLOTS', threading.BoundedSemaphore(1)))
+        server.DOWNLOAD_SLOTS.acquire()  # One download already running.
+        busy = self.post()
+        busy.download.assert_not_called()
+        self.assertEqual(busy.error.call_args.args[0], 429)
+        server.DOWNLOAD_SLOTS.release()  # It finishes, so the next request may start.
+        handler = self.post()
+        handler.download.assert_called_once()
+        handler.error.assert_not_called()
+        # The finished request gave its slot back.
+        self.assertTrue(server.DOWNLOAD_SLOTS.acquire(blocking=False))
 
 
 class UrlTests(unittest.TestCase):
