@@ -1,12 +1,9 @@
-# AV converter
-
 <div align="center">
+
+# AV converter
 
 Try this web app at https://av-converter.com
 
-</div>
-
-<div align="center">
   <img src="https://img.shields.io/badge/Node.js-0F9A41?style=for-the-badge&logo=node&color=black" alt="Node.js" />
   <img src="https://img.shields.io/badge/Express-0F9A41?style=for-the-badge&logo=express&color=black" alt="Express" />
   <img src="https://img.shields.io/badge/React-000000?style=for-the-badge&logo=react&logoColor=60DAFB" alt="React" />
