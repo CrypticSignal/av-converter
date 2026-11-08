@@ -39,19 +39,30 @@ Convert audio and video files right in your browser using FFmpeg and WebAssembly
 
 Convert audio and video files in your browser. The conversion runs on your device with FFmpeg compiled to WebAssembly, so your file is not uploaded.
 
-- **Audio:** convert a file, or the audio in a video, to AAC, AC3, ALAC, DTS, FLAC, MP3, Opus, Vorbis, WAV and more, with each format's own settings.
-- **Video:** re-encode the video with H.264, H.265, AV1, VP9 and many other encoders, resize it, change the frame rate, or trim it.
-- **Audio tracks:** choose which audio track to convert, or keep them all.
-- **Manual mode:** type your own FFmpeg command.
-- **No input size limit:** FFmpeg reads the input straight from disk.
+### Audio
 
-### Details
+Convert a file, or the audio in a video, to AAC, AC3, ALAC, DTS, FLAC, MP3, Opus, Vorbis or WAV, each with its own settings (such as bitrate).
 
-Audio output supports AAC, AC3, ALAC, DTS, FLAC, MP3, Opus, Vorbis, and WAV. The output contains exactly one audio track: the first, unless you pick another once the file's information has loaded (the picker appears for files with several). MKA, and outputs that keep the video, can instead hold all audio tracks; MKA does so by default. Keeping the video copies it unchanged, and for MKV to MKV also copies the subtitles and attachments. Manual command mode uses your own stream mapping.
+- The output contains exactly one audio track: the first, unless you pick another once the file's information has loaded (the picker appears for files with several).
+- MKA, and outputs that keep the video, can instead hold all audio tracks. MKA does so by default.
+- Keeping the video copies it unchanged, and for MKV to MKV also copies the subtitles and attachments.
 
-Choose **Video** instead of Audio to re-encode the video with any of the video encoders in FFmpeg's WebAssembly build (H.264, H.265, AV1, VP8, VP9, MPEG-4, Theora, ProRes, DNxHR, FFV1, GIF, animated WebP and PNG, and many older, uncompressed and image codecs). Each encoder offers only the containers it can be written to, and has its own quality settings where it has any. The audio can be re-encoded to any audio format the container can hold, with that format's settings (AAC by default where the container allows it), left as it is (the default for MKV and NUT, which hold almost any audio format), or removed. Audio formats that hold at most two channels, such as MP3, always downmix audio with more to stereo. Encoders that only allow certain frame sizes (such as DV, H.261 and H.263) resize the video to fit. Every encoder can also change the frame rate, width and height (all "Original" by default; with only the width or the height set, the other keeps the aspect ratio). To convert only part of the video, drag the start and end handles under the video preview. Browsers can't preview every format FFmpeg reads, but the handles still work then.
+### Video
+
+Choose **Video** instead of Audio to re-encode the video with any of the video encoders in FFmpeg's WebAssembly build (H.264, H.265, AV1, VP8, VP9, MPEG-4, Theora, ProRes, DNxHR, FFV1, GIF, animated WebP and PNG, and many older, uncompressed and image codecs).
+
+- **Containers and quality:** each encoder offers only the containers it can be written to, and has its own quality settings where it has any.
+- **Audio:** it can be re-encoded to any audio format the container can hold, with that format's settings (AAC by default where the container allows it), left as it is (the default for MKV and NUT, which hold almost any audio format), or removed. Audio formats that hold at most two channels, such as MP3, always downmix audio with more to stereo.
+- **Size and frame rate:** every encoder can change the frame rate, width and height (all "Original" by default; with only the width or the height set, the other keeps the aspect ratio). Encoders that only allow certain frame sizes (such as DV, H.261 and H.263) resize the video to fit.
+- **Trimming:** to convert only part of the video, drag the start and end handles under the video preview. Browsers can't preview every format FFmpeg reads, but the handles still work then.
 
 AV1 can be encoded with libaom or SVT-AV1, and AV1 input is decoded with dav1d. The FFmpeg cores in `vendor/ffmpeg-core` include all three (see its README). libaom is the first choice: in our benchmark it was faster than SVT-AV1 in the browser, and it also works without multi-threading. SVT-AV1 and H.265 need a browser that allows multi-threading (the page must be cross-origin isolated).
+
+### Manual command
+
+Tick **Write my own FFmpeg command** to type everything after `ffmpeg -i <input>` yourself. Manual command mode uses your own stream mapping.
+
+### File size and memory
 
 There's no limit on the input file's size: FFmpeg reads it directly from disk. The converted file, though, is held in the browser's memory until it's saved (about twice over at the peak), so a very large output, such as a long video with "Keep the video", can make the browser run out of memory. The page warns about this beforehand (in browsers that report the device's memory), and explains it if the tab crashes during a conversion.
 
