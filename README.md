@@ -6,6 +6,7 @@ Convert audio and video files right in your browser using FFmpeg and WebAssembly
 
 **Try this web app at [av-converter.com](https://av-converter.com)**
 
+<p>
   <img src="https://img.shields.io/badge/React-000000?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React" />
   <img src="https://img.shields.io/badge/TypeScript-000000?style=for-the-badge&logo=typescript&logoColor=3178C6" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Vite-000000?style=for-the-badge&logo=vite&logoColor=A78BFA" alt="Vite" />
@@ -15,8 +16,12 @@ Convert audio and video files right in your browser using FFmpeg and WebAssembly
   <img src="https://img.shields.io/badge/WebAssembly-000000?style=for-the-badge&logo=webassembly&logoColor=654FF0" alt="WebAssembly" />
   <img src="https://img.shields.io/badge/FFmpeg-000000?style=for-the-badge&logo=ffmpeg&logoColor=007808" alt="FFmpeg" />
   <img src="https://img.shields.io/badge/Docker-000000?style=for-the-badge&logo=docker&logoColor=0DB7ED" alt="Docker" />
+</p>
 
+<p>
   <img src="screenshot.png" alt="converter screenshot" width="480" />
+</p>
+
 </div>
 
 # Table of contents
