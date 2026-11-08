@@ -1,4 +1,3 @@
-import Typography from '@mui/material/Typography';
 import type { MediaInfo } from '../utils/probeFile';
 import { formatDuration } from '../utils/progress';
 
@@ -26,7 +25,7 @@ const MediaInfoPanel = ({ state }: { state: MediaInfoState }) => {
     );
   }
   if (state.status === 'failed') {
-    return <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>Couldn't read this file's information.</Typography>;
+    return <p className="mt-4 text-sm text-slate-400">Couldn't read this file's information.</p>;
   }
   const { duration, format, streams } = state.info;
   return (
@@ -52,7 +51,7 @@ const MediaInfoPanel = ({ state }: { state: MediaInfoState }) => {
         </ul>
       )}
       {streams.length > 0 && !streams.some(stream => stream.type === 'audio') && (
-        <Typography variant="body2" color="warning.main" sx={{ mt: 1.5 }}>This file has no audio stream to convert.</Typography>
+        <p className="mt-3 text-amber-300">This file has no audio stream to convert.</p>
       )}
     </section>
   );

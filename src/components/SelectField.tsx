@@ -1,5 +1,3 @@
-import TextField from '@mui/material/TextField';
-
 export interface SelectFieldProps {
   id: string;
   label: string;
@@ -8,6 +6,9 @@ export interface SelectFieldProps {
   /** [value, label] pairs, or [value, label, group] to show the option under a group heading. */
   options: readonly (readonly [string, string] | readonly [string, string, string])[];
   helperText?: React.ReactNode;
+  /** Fill the container's width, rather than a narrower centred column. */
+  fullWidth?: boolean;
+  disabled?: boolean;
 }
 
 type Option = SelectFieldProps['options'][number];
@@ -28,26 +29,20 @@ const renderOption = ([optionValue, optionLabel]: Option) =>
   <option key={optionValue} value={optionValue}>{optionLabel}</option>;
 
 /**
- * A labelled MUI select. It renders a native <select>, which keeps the platform's own
- * picker on phones and works with the keyboard and screen readers out of the box.
+ * A labelled native <select>, which keeps the platform's own picker on phones and works
+ * with the keyboard and screen readers out of the box.
  */
-const SelectField = ({ id, label, value, onChange, options, helperText }: SelectFieldProps) => (
-  <TextField
-    select
-    id={id}
-    label={label}
-    value={value}
-    onChange={event => onChange(event.target.value)}
-    helperText={helperText}
-    size="small"
-    fullWidth
-    sx={{ maxWidth: 320, my: 1.5 }}
-    slotProps={{ select: { native: true }, inputLabel: { shrink: true } }}
-  >
-    {groupOptions(options).map(({ group, options: grouped }, i) => group === undefined
-      ? grouped.map(renderOption)
-      : <optgroup key={`${group}-${i}`} label={group}>{grouped.map(renderOption)}</optgroup>)}
-  </TextField>
+const SelectField = ({ id, label, value, onChange, options, helperText, fullWidth, disabled }: SelectFieldProps) => (
+  <div className={`text-left ${fullWidth ? '' : 'mx-auto my-3 max-w-80'}`}>
+    <label htmlFor={id} className="mb-1.5 block text-xs font-medium text-slate-400">{label}</label>
+    <select id={id} value={value} disabled={disabled} onChange={event => onChange(event.target.value)}
+      aria-describedby={helperText ? `${id}-helper` : undefined} className="field field-select">
+      {groupOptions(options).map(({ group, options: grouped }, i) => group === undefined
+        ? grouped.map(renderOption)
+        : <optgroup key={`${group}-${i}`} label={group}>{grouped.map(renderOption)}</optgroup>)}
+    </select>
+    {helperText && <p id={`${id}-helper`} className="mt-1.5 text-xs leading-relaxed text-slate-400">{helperText}</p>}
+  </div>
 );
 
 export default SelectField;

@@ -8,7 +8,7 @@ import singleThreadWasmURL from '../../vendor/ffmpeg-core/st/ffmpeg-core.wasm?ur
 import multiThreadCoreURL from '../../vendor/ffmpeg-core/mt/ffmpeg-core.js?url';
 import multiThreadWasmURL from '../../vendor/ffmpeg-core/mt/ffmpeg-core.wasm?url';
 import multiThreadWorkerURL from '../../vendor/ffmpeg-core/mt/ffmpeg-core.worker.js?url';
-import type { AlertColor } from '@mui/material';
+import type { AlertSeverity } from '../components/Alert';
 import { nonnegative, OperationProgress } from './progress';
 import { downloadFile } from './downloadFile';
 
@@ -160,7 +160,7 @@ export interface ConversionJob {
   outputDuration?: number;
   /** Turns false once the job is cancelled or the page unmounts; nothing is reported after that. */
   isActive: () => boolean;
-  onAlert: (severity: AlertColor, message: string) => void;
+  onAlert: (severity: AlertSeverity, message: string) => void;
   onStatus: (value: OperationProgress) => void;
   onLog: (message: string) => void;
   /**

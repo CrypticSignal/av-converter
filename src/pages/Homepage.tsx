@@ -12,7 +12,6 @@ import { convertFile, loadFFmpeg, OUT_OF_MEMORY_ADVICE, type ConvertedFile } fro
 import { markConversionEnded, markConversionStarted, takeUnfinishedConversion } from '../utils/unfinishedConversion';
 import OperationStatus from '../components/OperationStatus';
 import type { OperationProgress } from '../utils/progress';
-import Button from '@mui/material/Button';
 import { allowsAllAudioTracks, createFFmpegArgs, createVideoArgs, videoHasAudio, type AudioTrack, type Trim } from '../utils/createFFmpegArgs';
 import { formatCommand } from '../utils/parseArgs';
 import { manualCommandArgs, videoThreadArgs } from '../utils/manualCommand';
@@ -25,24 +24,18 @@ import {
   CONTAINERS, VIDEO_AUDIO_FORMATS, VIDEO_ENCODERS, containerHoldsAudio, videoAudioEncodingOf, videoContainerOf, videoEncoderOf,
 } from '../videoEncoders';
 // General Components
+import Alert, { type AlertSeverity } from '../components/Alert';
+import Button from '../components/Button';
+import ChoiceGroup from '../components/ChoiceGroup';
 import FileInput from '../components/FileInput';
 import VideoTrimmer from '../components/VideoTrimmer';
 import SelectField from '../components/SelectField';
 import SettingNote from '../components/SettingNote';
+import TextField from '../components/TextField';
 import YesNoRadio from '../components/YesNoRadio';
 // Images
 import ffmpegLogo from '../images/ffmpeg-25.png';
 import webAssemblyLogo from '../images/webassembly-25.png';
-// Material UI
-import Alert, { AlertColor } from '@mui/material/Alert';
-import Typography from '@mui/material/Typography';
-import Checkbox from '@mui/material/Checkbox';
-import FormControl from '@mui/material/FormControl';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import Radio from '@mui/material/Radio';
-import RadioGroup from '@mui/material/RadioGroup';
-import InputAdornment from '@mui/material/InputAdornment';
-import TextField from '@mui/material/TextField';
 
 /**
  * The device's RAM in GB, roughly: browsers round it to a power of two and cap it.
@@ -110,7 +103,7 @@ const Homepage = (): React.JSX.Element => {
   // ---------------------------------------------------------------------------
 
   // The message box under the status (an error, "Converting", "Done!", ...).
-  const [alert, setAlert] = useState<{ severity: AlertColor; message: string } | null>(null);
+  const [alert, setAlert] = useState<{ severity: AlertSeverity; message: string } | null>(null);
 
   // The chosen format (e.g. 'MP3') and every format's settings (see FormatSettings in formats.tsx).
   // Both start from what the visitor used last time. Passing loadSettings itself (not
@@ -426,11 +419,12 @@ const Homepage = (): React.JSX.Element => {
           <Step n={1} title="Choose a file">
             <FileInput onFile={onFile} filename={inputFilename} disabled={isConverting} />
             {mediaInfo && <MediaInfoPanel state={mediaInfo} />}
-            <div className="mt-3 text-left">
-              <FormControlLabel
-                control={<Checkbox size="small" checked={manualMode} onChange={(_, checked) => setManualMode(checked)} />}
-                label={<span className="text-sm text-slate-300">Write my own FFmpeg command</span>}
-              />
+            <div className="mt-4 text-left">
+              <label className="inline-flex cursor-pointer items-center gap-2.5 text-sm text-slate-300 hover:text-white">
+                <input type="checkbox" className="checkbox" checked={manualMode}
+                  onChange={event => setManualMode(event.target.checked)} />
+                Write my own FFmpeg command
+              </label>
             </div>
           </Step>
 
@@ -445,22 +439,10 @@ const Homepage = (): React.JSX.Element => {
                 onChange={e => setManualCommandInput(e.target.value)}
                 placeholder="-c:v libx264 output.mp4"
                 helperText={<>Enter everything after the input, ending with the output filename (e.g. <code>-c:v libx264 output.mp4</code>).</>}
-                fullWidth
+                prefix={`ffmpeg -i ${inputFilename || 'input.mp4'}`}
                 autoComplete="off"
-                slotProps={{
-                  inputLabel: { shrink: true },
-                  htmlInput: { style: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' } },
-                  input: {
-                    startAdornment: (
-                      <InputAdornment position="start" title={`ffmpeg -i ${inputFilename || 'input.mp4'}`}
-                        sx={{ maxWidth: '50%', flexShrink: 0, overflow: 'hidden', fontFamily: 'monospace' }}>
-                        <span className="block whitespace-nowrap overflow-hidden text-ellipsis font-mono text-violet-300">
-                          ffmpeg -i {inputFilename || 'input.mp4'}
-                        </span>
-                      </InputAdornment>
-                    ),
-                  },
-                }}
+                spellCheck={false}
+                className="[&_input]:font-mono [&_input]:text-sm"
               />
             </Step>
           ) : (
@@ -468,14 +450,9 @@ const Homepage = (): React.JSX.Element => {
             <>
               <Step n={2} title="Pick a format">
                 {/* Audio: convert to one of FORMATS. Video: re-encode the video with one of VIDEO_ENCODERS. */}
-                <FormControl sx={{ display: 'block', mb: 0.5 }}>
-                  <RadioGroup row aria-label="Output type" name="output_type" value={settings.outputType}
-                    onChange={(_, value) => update('outputType', value as FormatSettings['outputType'])}
-                    sx={{ justifyContent: 'center' }}>
-                    <FormControlLabel value="audio" control={<Radio />} label="Audio" />
-                    <FormControlLabel value="video" control={<Radio />} label="Video" />
-                  </RadioGroup>
-                </FormControl>
+                <ChoiceGroup ariaLabel="Output type" name="output_type" value={settings.outputType}
+                  onChange={value => update('outputType', value)}
+                  options={[['audio', 'Audio'], ['video', 'Video']]} className="mt-0 mb-4" />
 
                 {isVideo ? <>
                   {/* "Video encoder" dropdown: every video encoder in FFmpeg's WebAssembly build, in groups. */}
@@ -532,20 +509,16 @@ const Homepage = (): React.JSX.Element => {
                   {containerHoldsAudio(videoContainer) && (
                     <Subsection title="Audio">
                       {/* Re-encode, keep as it is (where the container allows it), or remove the audio. */}
-                      <FormControl sx={{ display: 'flex', alignItems: 'center', my: 1 }}>
-                        <RadioGroup aria-label="Audio" name="video_audio"
-                          // Containers that can't keep the audio as it is always re-encode it.
-                          value={settings.videoAudio === 'copy' && CONTAINERS[videoContainer].noAudioCopy ? 'encode' : settings.videoAudio}
-                          onChange={(_, value) => update('videoAudio', value as FormatSettings['videoAudio'])}>
-                          {/* A container with only one audio format names it here; others offer a choice below. */}
-                          <FormControlLabel value="encode" control={<Radio />}
-                            label={CONTAINERS[videoContainer].fixedAudio ? `Re-encode (${CONTAINERS[videoContainer].fixedAudio.label})` : 'Re-encode'} />
-                          {!CONTAINERS[videoContainer].noAudioCopy && (
-                            <FormControlLabel value="copy" control={<Radio />} label="Do not re-encode" />
-                          )}
-                          <FormControlLabel value="none" control={<Radio />} label="Remove the audio" />
-                        </RadioGroup>
-                      </FormControl>
+                      <ChoiceGroup ariaLabel="Audio" name="video_audio"
+                        // Containers that can't keep the audio as it is always re-encode it.
+                        value={settings.videoAudio === 'copy' && CONTAINERS[videoContainer].noAudioCopy ? 'encode' : settings.videoAudio}
+                        onChange={value => update('videoAudio', value)}
+                        options={[
+                          // A container with only one audio format names it here; others offer a choice below.
+                          ['encode', CONTAINERS[videoContainer].fixedAudio ? `Re-encode (${CONTAINERS[videoContainer].fixedAudio.label})` : 'Re-encode'],
+                          ...(!CONTAINERS[videoContainer].noAudioCopy ? [['copy', 'Do not re-encode'] as const] : []),
+                          ['none', 'Remove the audio'],
+                        ]} />
                       {settings.videoAudio === 'copy' && !CONTAINERS[videoContainer].noAudioCopy && (
                         <SettingNote>This fails if the container can't hold the audio's format; re-encoding always works.</SettingNote>
                       )}
@@ -583,10 +556,9 @@ const Homepage = (): React.JSX.Element => {
                   value={outputName}
                   onChange={e => setOutputName(e.target.value)}
                   autoComplete="off"
-                  size="small"
-                  fullWidth
-                  sx={{ maxWidth: 320, my: 1.5 }}
-                  slotProps={{ htmlInput: { maxLength: 200 }, inputLabel: { shrink: true } }}
+                  spellCheck={false}
+                  maxLength={200}
+                  className="mx-auto my-3 max-w-80"
                 />
               </Step>
             </>
@@ -594,7 +566,7 @@ const Homepage = (): React.JSX.Element => {
         </fieldset>
 
         {largeForDevice && !isConverting && (
-          <Alert severity="warning" sx={{ my: 2 }}>
+          <Alert severity="warning" className="my-4">
             This file is large for this device's memory (about {deviceMemoryGB} GB). Keeping the video
             makes the converted file about as large, and the browser may run out of memory while saving it.
             Closing other tabs can help.
@@ -603,8 +575,7 @@ const Homepage = (): React.JSX.Element => {
 
         {/* Hidden rather than removed during a conversion, so the page layout doesn't jump. */}
         <div className={`mt-6 ${!isConverting ? 'block' : 'hidden'}`}>
-          <Button variant="contained" size="large" fullWidth onClick={onConvertClicked}
-            sx={{ py: 1.5, fontSize: '1.05rem' }}>
+          <Button onClick={onConvertClicked} className="w-full py-3 text-[1.05rem]">
             Convert
           </Button>
         </div>
@@ -623,24 +594,23 @@ const Homepage = (): React.JSX.Element => {
         <OperationStatus progress={status} busy={isConverting} logs={logs} />
         {isConverting && (
           <div className="mt-4">
-            <Button variant="outlined" color="inherit" onClick={cancel}
-              sx={{ borderColor: 'rgba(255,255,255,0.2)', color: 'text.secondary' }}>
+            <Button variant="outline" onClick={cancel}>
               Cancel
             </Button>
           </div>
         )}
 
-        {alert && <Alert severity={alert.severity} sx={{ mt: 2 }}>{alert.message}</Alert>}
+        {alert && <Alert severity={alert.severity} className="mt-4">{alert.message}</Alert>}
 
         {/* A link to download the converted file again, in case the automatic download was blocked. */}
         {output && !isConverting && (
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+          <p className="mt-4 text-sm text-slate-400">
             If the download didn't start,{' '}
             <a href={output.url} download={output.filename} className="underline text-cyan-300 hover:text-cyan-200">
               download {output.filename}
             </a>{' '}
             ({formatBytes(output.size)}).
-          </Typography>
+          </p>
         )}
       </div>
     </div>

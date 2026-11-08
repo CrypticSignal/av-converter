@@ -1,5 +1,15 @@
-import { LinearProgress } from '@mui/material';
 import { formatDuration, type OperationProgress } from '../utils/progress';
+
+/** A progress bar: filled to `percent`, or a sliding stripe when the percentage isn't known. */
+const ProgressBar = ({ percent }: { percent?: number }) => (
+  <div role="progressbar" aria-label="Operation progress" aria-valuemin={0} aria-valuemax={100}
+    aria-valuenow={percent === undefined ? undefined : Math.round(percent)}
+    className="mt-3 h-2 overflow-hidden rounded-full bg-white/[0.08]">
+    <div className={`h-full rounded-full bg-linear-to-r from-violet-500 to-cyan-400 shadow-[0_0_12px_rgba(139,92,246,0.6)] ${
+      percent === undefined ? 'progress-indeterminate w-2/5' : 'transition-[width] duration-300 ease-out'}`}
+      style={percent === undefined ? undefined : { width: `${Math.min(100, Math.max(0, percent))}%` }} />
+  </div>
+);
 
 /** A small label/value pair in the status bar. */
 const Stat = ({ label, value }: { label: string; value: string }) => (
@@ -22,8 +32,7 @@ export default function OperationStatus({ progress, busy, logs }: {
         <span className="text-lg font-semibold gradient-text tabular-nums">{progress.percent.toFixed(1)}%</span>
       )}
     </div>
-    {busy && <LinearProgress aria-label="Operation progress" sx={{ mt: 1.5 }}
-      variant={progress.percent === undefined ? 'indeterminate' : 'determinate'} value={progress.percent} />}
+    {busy && <ProgressBar percent={progress.percent} />}
     {(progress.elapsed !== undefined || progress.speed !== undefined || progress.eta !== undefined) && (
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
         {progress.elapsed !== undefined && <Stat label="Elapsed" value={formatDuration(Math.floor(progress.elapsed))} />}

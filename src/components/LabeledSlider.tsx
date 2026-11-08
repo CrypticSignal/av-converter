@@ -1,6 +1,4 @@
-import Box from '@mui/material/Box';
-import Slider from '@mui/material/Slider';
-import Typography from '@mui/material/Typography';
+import Slider from './Slider';
 
 export interface LabeledSliderProps {
   id: string;
@@ -14,29 +12,22 @@ export interface LabeledSliderProps {
   unit?: string;
 }
 
-/** An MUI slider with a visible label and its current value. Values are strings, as in the settings. */
+/** A slider with a visible label and its current value. Values are strings, as in the settings. */
 const LabeledSlider = ({ id, label, value, onChange, min, max, step, unit }: LabeledSliderProps) => {
-  const display = unit ? `${value} ${unit}` : value;
+  const format = (number: number) => unit ? `${number} ${unit}` : String(number);
   return (
-    <Box sx={{ width: '100%', maxWidth: 320, mx: 'auto', my: 1.5 }}>
-      <Typography id={`${id}_label`} variant="body2" component="label" htmlFor={id}
-        sx={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span>{label}</span>
-        <strong>{display}</strong>
-      </Typography>
+    <div id={id} className="mx-auto my-4 w-full max-w-80 text-left">
       <Slider
+        label={label}
+        valueText={format(Number(value))}
         value={Number(value)}
         min={min}
         max={max}
         step={step}
-        marks
-        valueLabelDisplay="auto"
-        valueLabelFormat={() => display}
-        getAriaValueText={() => display}
-        onChange={(_, newValue) => onChange(String(newValue))}
-        slotProps={{ input: { id, 'aria-labelledby': `${id}_label` } }}
+        formatValue={format}
+        onChange={newValue => onChange(String(newValue))}
       />
-    </Box>
+    </div>
   );
 };
 
