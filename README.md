@@ -2,7 +2,7 @@
 
 # AV converter
 
-Convert audio and video files right in your browser using FFmpeg and WebAssembly. Nothing is uploaded.
+Convert audio and video files right in your browser using FFmpeg and WebAssembly. Your file is not uploaded.
 
 **Try this web app at [av-converter.com](https://av-converter.com)**
 
