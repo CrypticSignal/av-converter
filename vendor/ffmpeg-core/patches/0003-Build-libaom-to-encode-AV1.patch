@@ -1,0 +1,100 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: av-converter <av-converter@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 03:47:13 +0000
+Subject: [PATCH 3/3] Build libaom to encode AV1
+
+libaom 3.9.1 is built from the official release tarball, pinned by its
+SHA-256 checksum (its contents match the v3.9.1 tag), and enabled with
+--enable-libaom in both cores. build/aom.sh already existed, without a Docker
+stage; it now:
+- sets CMAKE_BUILD_TYPE, which libaom 3.x needs;
+- leaves out the decoder (dav1d decodes AV1), and FFmpeg's wrapper for it
+  (--disable-decoder=libaom_av1);
+- builds for realtime mode only (CONFIG_REALTIME_ONLY). In WebAssembly, "good"
+  mode took about 13 times as long for a file about 6% smaller and about 1 dB
+  better on the benchmark clip.
+
+Unlike SVT-AV1, it works without threads, and in the multi-threaded core it
+was faster than SVT-AV1 for the same quality.
+---
+ Dockerfile   | 18 +++++++++++++++++-
+ build/aom.sh |  5 +++++
+ 2 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/Dockerfile b/Dockerfile
+index df387e8..de1577d 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -151,6 +151,18 @@ ADD https://gitlab.com/AOMediaCodec/SVT-AV1.git#$SVTAV1_BRANCH /src
+ COPY build/svtav1.sh /src/build.sh
+ RUN bash -x /src/build.sh
+ 
++# Build libaom (AV1 encoder), from the official release tarball. Like dav1d, it has its own
++# stage for caching.
++FROM emsdk-base AS aom-builder
++ENV AOM_VERSION=3.9.1
++# The checksum makes the build fail if the download isn't exactly this tarball.
++ADD --checksum=sha256:dba99fc1c28aaade28dda59821166b2fa91c06162d1bc99fde0ddaad7cecc50e \
++      https://storage.googleapis.com/aom-releases/libaom-$AOM_VERSION.tar.gz /tmp/aom.tar.gz
++# Unpack the tarball into /src. --strip-components=1 drops its top-level libaom-3.9.1/ folder.
++RUN mkdir -p /src && tar xzf /tmp/aom.tar.gz -C /src --strip-components=1
++COPY build/aom.sh /src/build.sh
++RUN bash -x /src/build.sh
++
+ # Base ffmpeg image with dependencies and source code populated.
+ FROM emsdk-base AS ffmpeg-base
+ RUN embuilder build sdl2 sdl2-mt
+@@ -167,6 +179,7 @@ COPY --from=libass-builder $INSTALL_DIR $INSTALL_DIR
+ COPY --from=zimg-builder $INSTALL_DIR $INSTALL_DIR
+ COPY --from=dav1d-builder $INSTALL_DIR $INSTALL_DIR
+ COPY --from=svtav1-builder $INSTALL_DIR $INSTALL_DIR
++COPY --from=aom-builder $INSTALL_DIR $INSTALL_DIR
+ 
+ # Build ffmpeg
+ FROM ffmpeg-base AS ffmpeg-builder
+@@ -187,6 +200,8 @@ RUN bash -x /src/build.sh \
+       --enable-libass \
+       --enable-libzimg \
+       --enable-libdav1d \
++      --enable-libaom \
++      --disable-decoder=libaom_av1 \
+       ${FFMPEG_MT:+--enable-libsvtav1}
+ 
+ # Build ffmpeg.wasm
+@@ -215,7 +230,8 @@ ENV FFMPEG_LIBS \
+       -lharfbuzz \
+       -lass \
+       -lzimg \
+-      -ldav1d
++      -ldav1d \
++      -laom
+ # SVT-AV1 needs threads, so it's only linked into the multi-threaded core.
+ RUN mkdir -p /src/dist/umd && bash -x /src/build.sh \
+       ${FFMPEG_LIBS} ${FFMPEG_MT:+-lSvtAv1Enc} \
+diff --git a/build/aom.sh b/build/aom.sh
+index 256907e..869eb0a 100755
+--- a/build/aom.sh
++++ b/build/aom.sh
+@@ -2,10 +2,13 @@
+ 
+ set -euo pipefail
+ 
++# CMake options for libaom. The converter needs a realtime-only encoder, so the decoder and the
++# good-quality mode are left out (see the vendor README for the measurements).
+ CM_FLAGS=(
+   -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR           # assign lib and include install path
+   -DCMAKE_TOOLCHAIN_FILE=$EM_TOOLCHAIN_FILE     # use emscripten toolchain file
+   -DBUILD_SHARED_LIBS=0                         # disable shared library build
++  -DCMAKE_BUILD_TYPE=Release                    # libaom 3.x needs a build type
+   -DAOM_TARGET_CPU=generic                      # use generic cpu
+   -DENABLE_DOCS=0                               # disable docs
+   -DENABLE_TESTS=0                              # disable tests
+@@ -13,6 +16,8 @@ CM_FLAGS=(
+   -DENABLE_TOOLS=0                              # disable tools
+   -DCONFIG_RUNTIME_CPU_DETECT=0                 # disable cpu detect
+   -DCONFIG_WEBM_IO=0                            # disable libwebm support
++  -DCONFIG_AV1_DECODER=0                        # encoder only: dav1d decodes AV1
++  -DCONFIG_REALTIME_ONLY=1                      # realtime mode only: "good" mode is far too slow here
+ )
+ 
+ CMBUILD_DIR=cmbuild

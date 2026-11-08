@@ -13,17 +13,22 @@ import { markConversionEnded, markConversionStarted, takeUnfinishedConversion } 
 import OperationStatus from '../components/OperationStatus';
 import type { OperationProgress } from '../utils/progress';
 import Button from '@mui/material/Button';
-import { allowsAllAudioTracks, createFFmpegArgs, type AudioTrack } from '../utils/createFFmpegArgs';
+import { allowsAllAudioTracks, createFFmpegArgs, createVideoArgs, videoHasAudio, type AudioTrack, type Trim } from '../utils/createFFmpegArgs';
 import { formatCommand } from '../utils/parseArgs';
-import { manualCommandArgs } from '../utils/manualCommand';
+import { manualCommandArgs, videoThreadArgs } from '../utils/manualCommand';
 import { formatBytes } from '../utils/progress';
 import { loadSettings, saveSettings } from '../utils/savedSettings';
 import { probeFile, type StreamInfo } from '../utils/probeFile';
 import MediaInfoPanel, { type MediaInfoState } from '../components/MediaInfoPanel';
 import { FORMATS, type Codec, type FormatSettings, type SetSetting } from '../formats';
+import {
+  CONTAINERS, VIDEO_AUDIO_FORMATS, VIDEO_ENCODERS, containerHoldsAudio, videoAudioEncodingOf, videoContainerOf, videoEncoderOf,
+} from '../videoEncoders';
 // General Components
 import FileInput from '../components/FileInput';
+import VideoTrimmer from '../components/VideoTrimmer';
 import SelectField from '../components/SelectField';
+import SettingNote from '../components/SettingNote';
 import YesNoRadio from '../components/YesNoRadio';
 // Images
 import ffmpegLogo from '../images/ffmpeg-25.png';
@@ -32,7 +37,10 @@ import webAssemblyLogo from '../images/webassembly-25.png';
 import Alert, { AlertColor } from '@mui/material/Alert';
 import Typography from '@mui/material/Typography';
 import Checkbox from '@mui/material/Checkbox';
+import FormControl from '@mui/material/FormControl';
 import FormControlLabel from '@mui/material/FormControlLabel';
+import Radio from '@mui/material/Radio';
+import RadioGroup from '@mui/material/RadioGroup';
 import InputAdornment from '@mui/material/InputAdornment';
 import TextField from '@mui/material/TextField';
 
@@ -51,6 +59,37 @@ const trackLabel = (stream: StreamInfo) =>
   `Stream ${stream.index}`
   + (stream.codec ? ` (${stream.codec})` : '')
   + (stream.details.length ? ` — ${stream.details.join(', ')}` : '');
+
+/**
+ * Call `onChange` whenever `value` changes, but not on the first render, so settings
+ * restored from the last visit aren't overwritten by defaults.
+ */
+const useOnChange = (value: string, onChange: () => void) => {
+  const previous = useRef(value);
+  useEffect(() => {
+    if (previous.current === value) return;
+    previous.current = value;
+    onChange();
+  });
+};
+
+/** A titled group of related settings within a step, e.g. a video's audio settings. */
+const Subsection = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <section className="mt-5 rounded-2xl bg-white/[0.03] ring-1 ring-white/[0.06] px-4 pt-3 pb-2">
+    <h3 className="text-left text-xs font-semibold uppercase tracking-wider text-slate-400">{title}</h3>
+    {children}
+  </section>
+);
+
+/** The frame rate and size options. Common values, all defaulting to the input's own. */
+const withOriginal = (values: string[], unit: string) =>
+  [['original', 'Original'] as const, ...values.map(value => [value, `${value} ${unit}`] as const)];
+const FPS_OPTIONS = withOriginal(['60', '50', '30', '25', '24', '15', '12', '10', '5'], 'fps');
+const WIDTH_OPTIONS = withOriginal(['3840', '2560', '1920', '1280', '1024', '854', '640', '480', '320'], 'px');
+const HEIGHT_OPTIONS = withOriginal(['2160', '1440', '1080', '720', '576', '480', '360', '240'], 'px');
+
+/** The "Video encoder" dropdown's options, grouped as in videoEncoders.tsx. */
+const VIDEO_ENCODER_OPTIONS = Object.entries(VIDEO_ENCODERS).map(([value, { label, group }]) => [value, label, group] as const);
 
 /** A numbered step in the converter card. */
 const Step = ({ n, title, children }: { n: number; title: string; children: React.ReactNode }) => (
@@ -89,6 +128,8 @@ const Homepage = (): React.JSX.Element => {
   // The audio track the user picked, or null for the format's default (see audioTrack below).
   // Track numbers only make sense for this file, so unlike the settings this isn't saved.
   const [chosenTrack, setChosenTrack] = useState<AudioTrack | null>(null);
+  // The part of the video to convert, or null for all of it. Like the track, only for this file.
+  const [trim, setTrim] = useState<Trim | null>(null);
   const [isConverting, setIsConverting] = useState(false);
 
   // Manual mode: the user types everything after `ffmpeg -i <input>` themselves.
@@ -155,6 +196,12 @@ const Homepage = (): React.JSX.Element => {
   const inputFilename = file?.name ?? '';
   // The selected format's entry in formats.tsx: its label, extension, args, Panel and flags.
   const format = FORMATS[codec];
+  // Whether the video is re-encoded with one of VIDEO_ENCODERS, rather than converting the audio.
+  const isVideo = settings.outputType === 'video';
+  // The chosen video encoder's entry in videoEncoders.tsx, and the container it's written to.
+  const videoEncoderName = videoEncoderOf(settings);
+  const videoEncoder = VIDEO_ENCODERS[videoEncoderName];
+  const videoContainer = videoContainerOf(settings);
   // The selected file's audio tracks, once ffprobe has read it.
   const audioStreams = mediaInfo?.status === 'ready'
     ? mediaInfo.info.streams.filter(stream => stream.type === 'audio') : [];
@@ -163,16 +210,41 @@ const Homepage = (): React.JSX.Element => {
   // Keeping the video makes the output about as large as the input, and the converted file is
   // held in memory until it's saved (about twice over at the peak), so warn when it's large
   // for this device's memory.
-  const largeForDevice = !manualMode && file !== undefined && Boolean(format.keepVideo && settings.isKeepVideo)
+  const largeForDevice = !manualMode && !isVideo && file !== undefined && Boolean(format.keepVideo && settings.isKeepVideo)
     && deviceMemoryGB !== undefined && file.size > deviceMemoryGB * 1024 ** 3 / 4;
   // The audio track that will be converted: the user's choice, else all tracks for MKA and the
   // first track for every other format. "All" falls back to the first track if the user then
   // switches to a format that holds only one.
   const audioTrack: AudioTrack = chosenTrack === 'all' && !allowsAll ? 0
-    : chosenTrack ?? (format.allAudioTracks ? 'all' : 0);
+    : chosenTrack ?? (!isVideo && format.allAudioTracks ? 'all' : 0);
+  // Whether to offer trimming: for video outputs, unless ffprobe found no video in the file.
+  const offersTrim = isVideo && file !== undefined
+    && !(mediaInfo?.status === 'ready' && !mediaInfo.info.streams.some(stream => stream.type === 'video'));
+  // The steps after "Pick a format" move down one when the Trim step is shown.
+  const afterTrim = offersTrim ? 1 : 0;
+  // Whether there's audio in the output to pick a track for.
+  const hasAudio = !isVideo || videoHasAudio(settings);
+  // Whether a video's audio is re-encoded, rather than kept as it is or left out.
+  const reencodesVideoAudio = isVideo && hasAudio
+    && (settings.videoAudio === 'encode' || Boolean(CONTAINERS[videoContainer].noAudioCopy));
+  // How a video's audio is encoded then: the container's fixed audio, or the chosen audio format.
+  const videoAudioEncoder = reencodesVideoAudio ? videoAudioEncodingOf(settings) : undefined;
+  // Downmix to stereo is offered when the audio is encoded, unless the container sets the
+  // channels itself (DV is always stereo, AMV always mono).
+  const offersDownmix = isVideo
+    ? Boolean(videoAudioEncoder && !videoAudioEncoder.args.includes('-ac'))
+    : !format.copiesAudio;
+  // Whether the audio encoder can't write more than two channels (e.g. MP3), so it's always downmixed.
+  const stereoOnly = isVideo ? Boolean(videoAudioEncoder?.stereoOnly) : Boolean(format.stereoOnly);
   // Change one setting, e.g. update('mp3Bitrate', '256'). It copies the settings object
   // rather than editing it, because React only notices a change when it gets a new object.
   const update: SetSetting = (key, value) => setSettings(previous => ({ ...previous, [key]: value }));
+
+  // Picking a container sets the audio to its default: not re-encoded for MKV and NUT, which
+  // hold almost any audio format, else re-encoded. A choice to remove the audio is kept.
+  useOnChange(isVideo ? videoContainer : '', () => {
+    if (isVideo && settings.videoAudio !== 'none') update('videoAudio', CONTAINERS[videoContainer].defaultAudio ?? 'encode');
+  });
 
   // ---------------------------------------------------------------------------
   // Event handlers.
@@ -186,6 +258,7 @@ const Homepage = (): React.JSX.Element => {
     probeToken.current = null;
     setMediaInfo(null);
     setChosenTrack(null);
+    setTrim(null);
     setFile(currentFile);
     if (!currentFile) return;
     setAlert(null);
@@ -241,7 +314,9 @@ const Homepage = (): React.JSX.Element => {
     try {
       ({ ffmpegArgs, outputFilename } = manualMode
         ? manualCommandArgs(file.name, manualCommandInput)
-        : createFFmpegArgs(file.name, codec, settings, outputName.trim(), audioTrack));
+        : isVideo
+          ? createVideoArgs(file.name, settings, outputName.trim(), audioTrack, videoThreadArgs(), offersTrim ? trim ?? undefined : undefined)
+          : createFFmpegArgs(file.name, codec, settings, outputName.trim(), audioTrack));
     } catch (error) {
       setAlert({ severity: 'error', message: (error as Error).message });
       return;
@@ -269,6 +344,8 @@ const Homepage = (): React.JSX.Element => {
       // A manual command might change the output's length (e.g. by trimming), so the
       // input's duration can't be used to show a percentage.
       knownTimeline: !manualMode,
+      // When trimmed, a percentage is of the trimmed part.
+      outputDuration: !manualMode && isVideo && offersTrim && trim ? trim.end - trim.start : undefined,
       isActive,
       onAlert: (severity, message) => setAlert({ severity, message }),
       onStatus: setStatus,
@@ -293,6 +370,32 @@ const Homepage = (): React.JSX.Element => {
   // ---------------------------------------------------------------------------
   // What's shown on the page.
   // ---------------------------------------------------------------------------
+
+  // Audio track picker. Shown when ffprobe has found more than one audio track.
+  // Otherwise (or before ffprobe finishes, or if it fails) the default is used.
+  const audioTrackPicker = hasAudio && audioStreams.length > 1 && (
+    <SelectField id="audio_track" label="Audio track" value={String(audioTrack)}
+      onChange={value => setChosenTrack(value === 'all' ? 'all' : Number(value))}
+      options={[
+        ...(allowsAll ? [['all', 'All audio tracks'] as const] : []),
+        // The value is the track's position among the audio tracks (0 is the first): -map 0:a:<position>.
+        ...audioStreams.map((stream, position) => [String(position), trackLabel(stream)] as const),
+      ]} />
+  );
+
+  // The chosen audio format's settings, when a video's audio is re-encoded to a format the user picks.
+  const VideoAudioPanel = videoAudioEncoder?.format && VIDEO_AUDIO_FORMATS[videoAudioEncoder.format].Panel;
+
+  // Downmix to stereo, only when the audio is encoded (see offersDownmix). Formats that can't
+  // hold more than two channels are always downmixed, so they get a note instead of the choice.
+  const downmixControl = offersDownmix && (stereoOnly ? (
+    <SettingNote>This audio format holds at most two channels, so audio with more will be downmixed to stereo.</SettingNote>
+  ) : (
+    <div>
+      <YesNoRadio name="downmix" label="Downmix to stereo?" value={settings.downmixToStereo}
+        onChange={value => update('downmixToStereo', value)} />
+    </div>
+  ));
   return (
     <div className="max-w-2xl mx-auto">
       {/* Page header. */}
@@ -364,32 +467,104 @@ const Homepage = (): React.JSX.Element => {
             // Normal mode: choose a format and its settings.
             <>
               <Step n={2} title="Pick a format">
-                {/* "Desired format" dropdown, with one option per entry in FORMATS, e.g. ['MP3', 'MP3 (.mp3)']. */}
-                <SelectField id="codecs" label="Desired format" value={codec}
-                  onChange={value => setCodec(value as Codec)}
-                  options={Object.entries(FORMATS).map(([value, { label }]) => [value, label] as const)} />
+                {/* Audio: convert to one of FORMATS. Video: re-encode the video with one of VIDEO_ENCODERS. */}
+                <FormControl sx={{ display: 'block', mb: 0.5 }}>
+                  <RadioGroup row aria-label="Output type" name="output_type" value={settings.outputType}
+                    onChange={(_, value) => update('outputType', value as FormatSettings['outputType'])}
+                    sx={{ justifyContent: 'center' }}>
+                    <FormControlLabel value="audio" control={<Radio />} label="Audio" />
+                    <FormControlLabel value="video" control={<Radio />} label="Video" />
+                  </RadioGroup>
+                </FormControl>
 
-                {/* Audio track picker. Shown when ffprobe has found more than one audio track.
-                    Otherwise (or before ffprobe finishes, or if it fails) the default is used. */}
-                {audioStreams.length > 1 && (
-                  <SelectField id="audio_track" label="Audio track" value={String(audioTrack)}
-                    onChange={value => setChosenTrack(value === 'all' ? 'all' : Number(value))}
-                    options={[
-                      ...(allowsAll ? [['all', 'All audio tracks'] as const] : []),
-                      // The value is the track's position among the audio tracks (0 is the first): -map 0:a:<position>.
-                      ...audioStreams.map((stream, position) => [String(position), trackLabel(stream)] as const),
-                    ]} />
+                {isVideo ? <>
+                  {/* "Video encoder" dropdown: every video encoder in FFmpeg's WebAssembly build, in groups. */}
+                  <SelectField id="video_encoder" label="Video encoder" value={videoEncoderName}
+                    onChange={value => update('videoEncoder', value)} options={VIDEO_ENCODER_OPTIONS} />
+                  {/* Only the containers this encoder can be written to. */}
+                  <SelectField id="video_container" label="Container" value={videoContainer}
+                    onChange={value => update('videoContainer', value)}
+                    options={videoEncoder.containers.map(name => [name, CONTAINERS[name].label] as const)} />
+                </> : (
+                  // "Desired format" dropdown, with one option per entry in FORMATS, e.g. ['MP3', 'MP3 (.mp3)'].
+                  <SelectField id="codecs" label="Desired format" value={codec}
+                    onChange={value => setCodec(value as Codec)}
+                    options={Object.entries(FORMATS).map(([value, { label }]) => [value, label] as const)} />
                 )}
+
+                {/* For video, the track picker is in the Audio subsection of "Encoder settings" instead. */}
+                {!isVideo && audioTrackPicker}
               </Step>
 
-              <Step n={3} title="Encoder settings">
-                {/* The selected format's own controls, defined by its Panel in formats.tsx
-                    (e.g. MP3's encoding type and bitrate). They read `settings` and change them with `update`. */}
-                <format.Panel settings={settings} set={update} />
+              {/* Video only: a preview with start and end handles, to convert part of the video. */}
+              {offersTrim && (
+                <Step n={3} title="Trim (optional)">
+                  <VideoTrimmer file={file} trim={trim} onChange={setTrim}
+                    duration={mediaInfo?.status === 'ready' ? mediaInfo.info.duration : undefined}
+                    // Failed, or read the file but found no duration.
+                    probeFailed={mediaInfo?.status === 'failed' || (mediaInfo?.status === 'ready' && !mediaInfo.info.duration)} />
+                </Step>
+              )}
+
+              <Step n={3 + afterTrim} title="Encoder settings">
+                {isVideo ? <>
+                  {/* The video encoder's own controls and note, from videoEncoders.tsx. */}
+                  {videoEncoder.Panel && <videoEncoder.Panel settings={settings} set={update} />}
+                  {videoEncoder.note && <SettingNote>{videoEncoder.note}</SettingNote>}
+                  {!videoEncoder.Panel && !videoEncoder.note && <SettingNote>This encoder has no settings.</SettingNote>}
+
+                  {/* Frame rate and size, for every encoder. Left at Original, the input's are kept. */}
+                  <Subsection title="Frame rate and size">
+                    <SelectField id="video_fps" label="Frame rate" value={settings.videoFps}
+                      onChange={value => update('videoFps', value)} options={FPS_OPTIONS} />
+                    <SelectField id="video_width" label="Width" value={settings.videoWidth}
+                      onChange={value => update('videoWidth', value)} options={WIDTH_OPTIONS} />
+                    <SelectField id="video_height" label="Height" value={settings.videoHeight}
+                      onChange={value => update('videoHeight', value)} options={HEIGHT_OPTIONS} />
+                    <SettingNote>
+                      Set only the width or the height to keep the video's shape; setting both can stretch it.
+                      A lower frame rate makes a smaller file (10 to 15 fps is typical for GIFs); a higher
+                      one than the video's own repeats frames rather than making it smoother.
+                    </SettingNote>
+                  </Subsection>
+
+                  {/* The audio settings, unless the container can't hold audio (e.g. GIF). */}
+                  {containerHoldsAudio(videoContainer) && (
+                    <Subsection title="Audio">
+                      {/* Re-encode, keep as it is (where the container allows it), or remove the audio. */}
+                      <FormControl sx={{ display: 'flex', alignItems: 'center', my: 1 }}>
+                        <RadioGroup aria-label="Audio" name="video_audio"
+                          // Containers that can't keep the audio as it is always re-encode it.
+                          value={settings.videoAudio === 'copy' && CONTAINERS[videoContainer].noAudioCopy ? 'encode' : settings.videoAudio}
+                          onChange={(_, value) => update('videoAudio', value as FormatSettings['videoAudio'])}>
+                          {/* A container with only one audio format names it here; others offer a choice below. */}
+                          <FormControlLabel value="encode" control={<Radio />}
+                            label={CONTAINERS[videoContainer].fixedAudio ? `Re-encode (${CONTAINERS[videoContainer].fixedAudio.label})` : 'Re-encode'} />
+                          {!CONTAINERS[videoContainer].noAudioCopy && (
+                            <FormControlLabel value="copy" control={<Radio />} label="Do not re-encode" />
+                          )}
+                          <FormControlLabel value="none" control={<Radio />} label="Remove the audio" />
+                        </RadioGroup>
+                      </FormControl>
+                      {settings.videoAudio === 'copy' && !CONTAINERS[videoContainer].noAudioCopy && (
+                        <SettingNote>This fails if the container can't hold the audio's format; re-encoding always works.</SettingNote>
+                      )}
+                      {/* The audio format, from those the container can hold (AAC where it can), and its settings. */}
+                      {videoAudioEncoder?.format && <>
+                        <SelectField id="video_audio_format" label="Audio format" value={videoAudioEncoder.format}
+                          onChange={value => update('videoAudioFormat', value)}
+                          options={CONTAINERS[videoContainer].audioFormats!.map(name => [name, VIDEO_AUDIO_FORMATS[name].label] as const)} />
+                        {VideoAudioPanel && <VideoAudioPanel settings={settings} set={update} />}
+                      </>}
+                      {hasAudio && audioTrackPicker}
+                      {downmixControl}
+                    </Subsection>
+                  )}
+                </> : <format.Panel settings={settings} set={update} />}
 
                 {/* Options every format shares, shown only where they apply. */}
                 {/* Keep the input's video: only for formats that can go into a video file (keepVideo). */}
-                {format.keepVideo && (
+                {!isVideo && format.keepVideo && (
                   <div>
                     <YesNoRadio name="keep_video" label="Output" value={settings.isKeepVideo}
                       onChange={value => update('isKeepVideo', value)}
@@ -397,17 +572,11 @@ const Homepage = (): React.JSX.Element => {
                   </div>
                 )}
 
-                {/* Downmix to stereo: not for formats that copy the audio unchanged (copiesAudio). */}
-                {!format.copiesAudio && (
-                  <div>
-                    <YesNoRadio name="downmix" label="Downmix to stereo?" value={settings.downmixToStereo}
-                      onChange={value => update('downmixToStereo', value)} />
-                  </div>
-                )}
+                {!isVideo && downmixControl}
               </Step>
 
-              <Step n={4} title="Name the output">
-                {/* Output filename, without the extension; createFFmpegArgs adds the format's. */}
+              <Step n={4 + afterTrim} title="Name the output">
+                {/* Output filename, without the extension; createFFmpegArgs adds the format's or container's. */}
                 <TextField
                   id="output_name"
                   label="Output filename"

@@ -23,11 +23,16 @@
   - [Without Docker](#without-docker)
 - [Production](#production)
 - [Tests](#tests)
+- [Benchmarking encoders](#benchmarking-encoders)
 - [Code layout](#code-layout)
 
 ## Audio/Video Converter
 
 Convert audio files or the audio tracks in a video using FFmpeg in your browser. Supports AAC, AC3, ALAC, DTS, FLAC, MP3, Opus, Vorbis, and WAV. The output contains exactly one audio track: the first, unless you pick another once the file's information has loaded (the picker appears for files with several). MKA, and outputs that keep the video, can instead hold all audio tracks; MKA does so by default. Keeping the video copies it unchanged, and for MKV to MKV also copies the subtitles and attachments. Manual command mode uses your own stream mapping.
+
+Choose **Video** instead of Audio to re-encode the video with any of the video encoders in FFmpeg's WebAssembly build (H.264, H.265, AV1, VP8, VP9, MPEG-4, Theora, ProRes, DNxHR, FFV1, GIF, animated WebP and PNG, and many older, uncompressed and image codecs). Each encoder offers only the containers it can be written to, and has its own quality settings where it has any. The audio can be re-encoded to any audio format the container can hold, with that format's settings (AAC by default where the container allows it), left as it is (the default for MKV and NUT, which hold almost any audio format), or removed. Audio formats that hold at most two channels, such as MP3, always downmix audio with more to stereo. Encoders that only allow certain frame sizes (such as DV, H.261 and H.263) resize the video to fit. Every encoder can also change the frame rate, width and height (all "Original" by default; with only the width or the height set, the other keeps the aspect ratio). To convert only part of the video, drag the start and end handles under the video preview. Browsers can't preview every format FFmpeg reads, but the handles still work then.
+
+AV1 can be encoded with libaom or SVT-AV1, and AV1 input is decoded with dav1d. The FFmpeg cores in `vendor/ffmpeg-core` include all three (see its README). libaom is the first choice: in our benchmark it was faster than SVT-AV1 in the browser, and it also works without multi-threading. SVT-AV1 and H.265 need a browser that allows multi-threading (the page must be cross-origin isolated).
 
 There's no limit on the input file's size: FFmpeg reads it directly from disk. The converted file, though, is held in the browser's memory until it's saved (about twice over at the peak), so a very large output, such as a long video with "Keep the video", can make the browser run out of memory. The page warns about this beforehand (in browsers that report the device's memory), and explains it if the tab crashes during a conversion.
 
@@ -121,14 +126,28 @@ yarn test
 
 GitHub Actions runs both suites and the frontend build on every push to master and on pull requests.
 
+## Benchmarking encoders
+
+`scripts/benchmark-encoders.mjs` converts a video with several encoders through the converter itself (the production build, in Chromium, with the same FFmpeg WebAssembly cores as visitors get) and reports each one's time, file size and quality (PSNR against the input):
+
+```sh
+yarn build
+npx playwright install chromium   # once
+yarn benchmark path/to/video.mp4
+```
+
+It compares both AV1 encoders (libaom and SVT-AV1) at several speeds with VP9, H.264 and H.265, using the converter's settings for each. `--single-threaded` uses the single-threaded core, as in browsers that don't allow multi-threading; `--only AV1` runs just the encoders whose name contains "AV1"; `--keep <dir>` saves the outputs. The quality column needs `ffmpeg` on your PATH. A few seconds of real footage at the resolution you care about gives the most useful numbers.
+
 ## Code layout
 
 | Path | What it does |
 | --- | --- |
 | `src/formats.tsx` | One entry per output format: its label, extension, FFmpeg arguments and settings panel. |
-| `src/components/` | Small shared form controls (select, slider, yes/no radio, file input) and the status panel. |
+| `src/videoEncoders.tsx` | One entry per video encoder: its label, the containers it can be written to, its FFmpeg arguments and settings panel. |
+| `src/components/` | Small shared form controls (select, slider, yes/no radio, file input), the status panel, and the video trimmer. |
 | `src/utils/createFFmpegArgs.ts` | Builds the full FFmpeg command: which streams to include (`-map`), the format's arguments, and the shared options (keep the video, downmix to stereo). |
 | `src/utils/convertFile.ts` | Runs FFmpeg (WebAssembly) in the browser and downloads the result. |
+| `scripts/benchmark-encoders.mjs` | Compares video encoders' speed, file size and quality in the converter (`yarn benchmark`). |
 | `src/pages/Homepage.tsx` | The converter page. |
 | `src/utils/manualCommand.ts` | Checks and builds the arguments for a manual FFmpeg command. |
 | `src/pages/DownloadPage.tsx` | The video downloader page, which streams progress from the backend. |
@@ -136,11 +155,21 @@ GitHub Actions runs both suites and the frontend build on every push to master a
 | `set_password.py` | Sets the downloader's password, saving its hash in `downloader-password.env`. |
 | `docker/prod/nginx.conf`, `nginx-http.conf` | Nginx for HTTPS, and HTTP only (local mode and first certificate). Both include `locations.conf`, the site's routes. |
 | `logging/index.ts` | Records page visits in Loki, viewable in Grafana at `/grafana/`. |
-| `vendor/ffmpeg-core/` | The multi-threaded and single-threaded FFmpeg WebAssembly cores, which Vite bundles as content-hashed assets. Pages that aren't cross-origin isolated (no SharedArrayBuffer) fall back to the single-threaded core. They're built from ffmpeg.wasm's source, as the npm release can't encode Opus; its README explains why and how to rebuild them. |
+| `vendor/ffmpeg-core/` | The multi-threaded and single-threaded FFmpeg WebAssembly cores, which Vite bundles as content-hashed assets. Pages that aren't cross-origin isolated (no SharedArrayBuffer) fall back to the single-threaded core. They're built from ffmpeg.wasm's source: the npm release's Opus encoder crashes, and it can't decode or encode AV1. Its README explains why and how to rebuild them. |
+| `vendor/ffmpeg-core/patches/` | The patches that add AV1 support to those cores, applied to ffmpeg.wasm when they're rebuilt. See its README. |
 
 To add an output format:
 
 1. Add its name to `Codec` in `src/formats.tsx`.
 2. Add any settings it needs to `FormatSettings` and `DEFAULT_SETTINGS` (prefixed with the format's name, e.g. `mp3Bitrate`).
 3. Add an entry to `FORMATS` with its label, extension, FFmpeg `args` and settings `Panel`.
-4. Add a row to the table in `src/utils/createFFmpegArgs.test.ts`.
+4. Add a case to the `formats` list in `src/utils/createFFmpegArgs.test.ts`, with the arguments it should produce.
+
+To add a video encoder:
+
+1. Add an entry to `VIDEO_ENCODERS` in `src/videoEncoders.tsx`, keyed by its FFmpeg name. Give it
+   the containers it can be written to (the first is the default), its FFmpeg `args`, and a settings
+   `Panel` if it has any.
+2. Add any settings it needs to `FormatSettings` and `DEFAULT_SETTINGS` in `src/formats.tsx`.
+3. Check that the cores can write each container you list. The encoder has to be in the build (see
+   `vendor/ffmpeg-core/README.md`).

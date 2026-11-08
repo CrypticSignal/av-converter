@@ -1,0 +1,120 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: av-converter <av-converter@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 03:47:13 +0000
+Subject: [PATCH 1/3] Build dav1d to decode AV1
+
+FFmpeg's own AV1 decoder only hands frames to a hardware decoder, which
+WebAssembly doesn't have, so AV1 video fails to decode with "Failed to get
+pixel format". dav1d decodes AV1 in software.
+
+dav1d 1.2.1 is built with Meson (from Ubuntu's packages) using a cross file for
+Emscripten, without assembly, and enabled with --enable-libdav1d. FFmpeg
+n5.1.4 supports it.
+---
+ Dockerfile     | 18 ++++++++++++++++--
+ build/dav1d.sh | 46 ++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 62 insertions(+), 2 deletions(-)
+ create mode 100644 build/dav1d.sh
+
+diff --git a/Dockerfile b/Dockerfile
+index 51275c4..844c84a 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -132,6 +132,17 @@ RUN git clone --recursive -b $ZIMG_BRANCH https://github.com/sekrit-twc/zimg.git
+ COPY build/zimg.sh /src/build.sh
+ RUN bash -x /src/build.sh
+ 
++# Build dav1d (AV1 decoder). It has its own stage, so Docker caches its build and
++# reruns it only when this stage changes.
++FROM emsdk-base AS dav1d-builder
++# Meson and Ninja are dav1d's build tools. Emscripten comes from the base image.
++RUN apt-get update && apt-get install -y meson ninja-build
++ENV DAV1D_BRANCH=1.2.1
++# Fetch dav1d at the 1.2.1 release tag, into /src.
++ADD https://github.com/videolan/dav1d.git#$DAV1D_BRANCH /src
++COPY build/dav1d.sh /src/build.sh
++RUN bash -x /src/build.sh
++
+ # Base ffmpeg image with dependencies and source code populated.
+ FROM emsdk-base AS ffmpeg-base
+ RUN embuilder build sdl2 sdl2-mt
+@@ -146,6 +157,7 @@ COPY --from=vorbis-builder $INSTALL_DIR $INSTALL_DIR
+ COPY --from=libwebp-builder $INSTALL_DIR $INSTALL_DIR
+ COPY --from=libass-builder $INSTALL_DIR $INSTALL_DIR
+ COPY --from=zimg-builder $INSTALL_DIR $INSTALL_DIR
++COPY --from=dav1d-builder $INSTALL_DIR $INSTALL_DIR
+ 
+ # Build ffmpeg
+ FROM ffmpeg-base AS ffmpeg-builder
+@@ -164,7 +176,8 @@ RUN bash -x /src/build.sh \
+       --enable-libfreetype \
+       --enable-libfribidi \
+       --enable-libass \
+-      --enable-libzimg 
++      --enable-libzimg \
++      --enable-libdav1d
+ 
+ # Build ffmpeg.wasm
+ FROM ffmpeg-builder AS ffmpeg-wasm-builder
+@@ -191,7 +204,8 @@ ENV FFMPEG_LIBS \
+       -lfribidi \
+       -lharfbuzz \
+       -lass \
+-      -lzimg
++      -lzimg \
++      -ldav1d
+ RUN mkdir -p /src/dist/umd && bash -x /src/build.sh \
+       ${FFMPEG_LIBS} \
+       -o dist/umd/ffmpeg-core.js
+diff --git a/build/dav1d.sh b/build/dav1d.sh
+new file mode 100644
+index 0000000..afbc72b
+--- /dev/null
++++ b/build/dav1d.sh
+@@ -0,0 +1,46 @@
++#!/bin/bash
++# dav1d (AV1 decoder), built with Meson for Emscripten.
++
++set -euo pipefail
++
++# Meson takes the Emscripten toolchain and flags from a cross file. Meson's cross-file syntax
++# needs each flag as a quoted string in a list, so to_list turns "-O3 -msimd128" into
++# '-O3', '-msimd128'.
++to_list() { printf "'%s', " $1 | sed 's/, $//'; }
++cat > cross.txt <<CROSS
++[binaries]
++c = 'emcc'
++cpp = 'em++'
++ar = 'emar'
++pkg-config = 'pkg-config'
++
++[built-in options]
++c_args = [$(to_list "$CFLAGS")]
++c_link_args = [$(to_list "$LDFLAGS")]
++
++[host_machine]
++system = 'emscripten'
++cpu_family = 'wasm32'
++cpu = 'wasm32'
++endian = 'little'
++CROSS
++
++# Configure, then build and install. The options:
++#   --cross-file       the Emscripten toolchain (above)
++#   --prefix/--libdir  install the library under $INSTALL_DIR/lib, where FFmpeg's configure looks
++#   --buildtype=release  optimised, without debug info
++#   --default-library=static  a .a file, which is linked into FFmpeg's core
++#   -Denable_asm=false  no assembly: it's x86/Arm only, so WebAssembly can't use it
++#   -Denable_tools/-tests/-examples=false  leave out the programs, which aren't needed
++rm -rf build
++meson setup build \
++  --cross-file cross.txt \
++  --prefix=$INSTALL_DIR \
++  --libdir=lib \
++  --buildtype=release \
++  --default-library=static \
++  -Denable_asm=false \
++  -Denable_tools=false \
++  -Denable_tests=false \
++  -Denable_examples=false
++ninja -C build install

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Rebuilds the FFmpeg WebAssembly cores in this directory from ffmpeg.wasm's source.
+# Rebuilds the FFmpeg WebAssembly cores in this directory from ffmpeg.wasm's source, with the
+# patches in patches/ applied: they add dav1d (AV1 decoding), and SVT-AV1 and libaom (AV1 encoding).
 #
 # Why: the latest @ffmpeg/core release on npm (0.12.10, January 2025) predates
 # https://github.com/ffmpegwasm/ffmpeg.wasm/pull/824, which raises the stack size to 5 MB.
@@ -24,6 +25,11 @@ if ! git checkout --quiet "$COMMIT" 2>/dev/null; then
   git fetch --quiet origin "$COMMIT"
   git checkout --quiet FETCH_HEAD
 fi
+
+# Apply the patches in order (see the README).
+for patch in "$DEST"/patches/*.patch; do
+  git apply "$patch"
+done
 
 # The same production builds upstream publishes as @ffmpeg/core and @ffmpeg/core-mt.
 make prd

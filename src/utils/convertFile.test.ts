@@ -27,9 +27,24 @@ class FakeFFmpeg {
     this.loaded = true;
     return true;
   };
-  terminate = () => { this.terminations++; this.loaded = false; this.core = undefined; };
-  on = () => {};
-  off = () => {};
+  /** Rejects a pending exec, as terminating ffmpeg.wasm's worker does. */
+  private rejectExec?: (error: Error) => void;
+  private logListeners = new Set<(event: { message: string }) => void>();
+  terminate = () => {
+    this.terminations++;
+    this.loaded = false;
+    this.core = undefined;
+    this.rejectExec?.(new Error('called FFmpeg.terminate()'));
+  };
+  /** An exec that never finishes by itself, like a hung core. */
+  hang = () => new Promise<number>((_, reject) => { this.rejectExec = reject; });
+  log = (message: string) => this.logListeners.forEach(listener => listener({ message }));
+  on = (event: string, listener: (event: { message: string }) => void) => {
+    if (event === 'log') this.logListeners.add(listener);
+  };
+  off = (event: string, listener: (event: { message: string }) => void) => {
+    if (event === 'log') this.logListeners.delete(listener);
+  };
   deleteFile = async () => true;
   createDir = async () => true;
   mount = async () => true;
@@ -198,6 +213,55 @@ describe('convertFile', () => {
     const { alerts } = await run(ffmpeg);
     expect(ffmpeg.loads).toEqual(['mt']);
     expect(alerts.at(-1)).toEqual(['error', expect.stringMatching(/ran out of memory/)]);
+  });
+
+  describe('when FFmpeg stops responding', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('stops the multi-threaded core and retries single-threaded', async () => {
+      const { STALL_TIMEOUT_MS } = await importFresh();
+      const ffmpeg = new FakeFFmpeg();
+      ffmpeg.exec = async () => (ffmpeg.core === 'mt' ? ffmpeg.hang() : 0);
+      const conversion = run(ffmpeg);
+      await vi.advanceTimersByTimeAsync(STALL_TIMEOUT_MS + 1000);
+      const { alerts, statuses, onOutput } = await conversion;
+      expect(ffmpeg.loads).toEqual(['mt', 'st']);
+      expect(onOutput).toHaveBeenCalledOnce();
+      expect(alerts).toContainEqual(['warning', expect.stringMatching(/stopped responding, so trying again without multi-threading/)]);
+      expect(statuses.at(-1)).toBe('Conversion complete');
+    });
+
+    it('waits while FFmpeg keeps logging, however long the conversion takes', async () => {
+      const { STALL_TIMEOUT_MS } = await importFresh();
+      const ffmpeg = new FakeFFmpeg();
+      let finish!: (code: number) => void;
+      ffmpeg.exec = () => new Promise<number>(resolve => { finish = resolve; });
+      const conversion = run(ffmpeg);
+      for (let i = 0; i < 5; i++) {
+        await vi.advanceTimersByTimeAsync(STALL_TIMEOUT_MS - 1000);
+        ffmpeg.log('frame=    1 fps=0.0 q=0.0 size=       0kB time=00:00:00.00 bitrate=N/A speed=   0x');
+      }
+      finish(0);
+      const { statuses } = await conversion;
+      expect(ffmpeg.loads).toEqual(['mt']);
+      expect(ffmpeg.terminations).toBe(0);
+      expect(statuses.at(-1)).toBe('Conversion complete');
+    });
+
+    it('does not stop the single-threaded core', async () => {
+      vi.stubGlobal('crossOriginIsolated', false);
+      const { STALL_TIMEOUT_MS } = await importFresh();
+      const ffmpeg = new FakeFFmpeg();
+      let finish!: (code: number) => void;
+      ffmpeg.exec = () => new Promise<number>(resolve => { finish = resolve; });
+      const conversion = run(ffmpeg);
+      await vi.advanceTimersByTimeAsync(STALL_TIMEOUT_MS * 3);
+      finish(0);
+      const { statuses } = await conversion;
+      expect(ffmpeg.terminations).toBe(0);
+      expect(statuses.at(-1)).toBe('Conversion complete');
+    });
   });
 
   it('does not retry errors FFmpeg reports', async () => {
