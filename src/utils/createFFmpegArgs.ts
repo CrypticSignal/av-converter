@@ -1,7 +1,17 @@
 import { FORMATS, type Codec, type FormatSettings } from '../formats';
-import { CONTAINERS, VIDEO_ENCODERS, containerHoldsAudio, videoAudioEncodingOf, videoContainerOf, videoEncoderOf } from '../videoEncoders';
+import { CONTAINERS, VIDEO_ENCODERS, type Container, containerHoldsAudio, videoAudioEncodingOf, videoContainerOf, videoEncoderOf } from '../videoEncoders';
 
-const MP4_FAMILY = ['.mp4', '.mov'];
+/**
+ * The extension of the file that keeps the input's video: the input's own container, unless
+ * it can't hold the audio format (or isn't a container we write), then MKV.
+ */
+export const keepVideoExtension = (codec: Codec, inputFilename: string): string => {
+  const extension = inputFilename.slice(inputFilename.lastIndexOf('.')).toLowerCase();
+  const name = extension.slice(1);
+  if (!Object.hasOwn(CONTAINERS, name)) return '.mkv';
+  const audioFormats: readonly string[] = CONTAINERS[name as Container].audioFormats ?? [];
+  return audioFormats.includes(codec) ? extension : '.mkv';
+};
 
 /**
  * Make a user-typed name safe as an output filename: path separators would point into
@@ -32,15 +42,20 @@ export const videoHasAudio = (settings: FormatSettings): boolean =>
 const videoAllowsAllAudioTracks = (settings: FormatSettings): boolean =>
   videoHasAudio(settings) && !CONTAINERS[videoContainerOf(settings)].singleAudioTrack;
 
-const audioAllowsAllAudioTracks = (codec: Codec, settings: FormatSettings): boolean =>
-  Boolean(FORMATS[codec].allAudioTracks || (FORMATS[codec].keepVideo && settings.isKeepVideo));
+const audioAllowsAllAudioTracks = (codec: Codec, settings: FormatSettings, inputFilename?: string): boolean => {
+  if (FORMATS[codec].allAudioTracks) return true;
+  if (!FORMATS[codec].keepVideo || !settings.isKeepVideo) return false;
+  // Some containers (e.g. FLV) hold only one audio track.
+  const container = inputFilename && keepVideoExtension(codec, inputFilename).slice(1);
+  return !(container && Object.hasOwn(CONTAINERS, container) && CONTAINERS[container as Container].singleAudioTrack);
+};
 
 /**
  * Whether the output can hold several audio tracks: MKA, any output that keeps the video
- * (MP4, MOV or MKV), and a re-encoded video whose container allows it.
+ * (unless its container holds one track only), and a re-encoded video whose container allows it.
  */
-export const allowsAllAudioTracks = (codec: Codec, settings: FormatSettings): boolean =>
-  settings.outputType === 'video' ? videoAllowsAllAudioTracks(settings) : audioAllowsAllAudioTracks(codec, settings);
+export const allowsAllAudioTracks = (codec: Codec, settings: FormatSettings, inputFilename?: string): boolean =>
+  settings.outputType === 'video' ? videoAllowsAllAudioTracks(settings) : audioAllowsAllAudioTracks(codec, settings, inputFilename);
 
 const checkAudioTrack = (audioTrack: AudioTrack, allowsAll: boolean) => {
   if (audioTrack === 'all' ? !allowsAll : !(Number.isSafeInteger(audioTrack) && audioTrack >= 0)) {
@@ -141,14 +156,13 @@ export const createFFmpegArgs = (
 ): { ffmpegArgs: string[]; outputFilename: string } => {
   const format = FORMATS[codec];
   const keepVideo = Boolean(format.keepVideo && settings.isKeepVideo);
-  checkAudioTrack(audioTrack, audioAllowsAllAudioTracks(codec, settings));
+  checkAudioTrack(audioTrack, audioAllowsAllAudioTracks(codec, settings, inputFilename));
 
-  // With the video, keep the input's container if it's MP4/MOV and the format allows it; otherwise use MKV.
+  // With the video, keep the input's container if it can hold the audio format; otherwise use MKV.
   const inputExtension = inputFilename.slice(inputFilename.lastIndexOf('.')).toLowerCase();
   let extension = format.extension;
   if (keepVideo) {
-    const keepsContainer = format.keepVideo === 'mp4' && MP4_FAMILY.includes(inputExtension);
-    extension = keepsContainer ? inputExtension : '.mkv';
+    extension = keepVideoExtension(codec, inputFilename);
   }
 
   // Say exactly which streams go into the output. Once there's a -map, FFmpeg adds nothing

@@ -89,9 +89,14 @@ describe('keeping the video', () => {
     ['AC3', 'input.mov', 'output.mov'],
     ['ALAC', 'input.MP4', 'output.mp4'],
     ['MP3', 'input.webm', 'output.mkv'],
+    ['MP3', 'input.avi', 'output.avi'],
+    ['AAC', 'input.ts', 'output.ts'],
+    ['MP3', 'input.mkv', 'output.mkv'],
+    ['AAC', 'input.m4v', 'output.mkv'],
     ['AAC', 'input', 'output.mkv'],
-    ['DTS', 'input.mp4', 'output.mkv'],
+    ['DTS', 'input.mp4', 'output.mp4'],
     ['FLAC', 'input.mov', 'output.mkv'],
+    ['FLAC', 'input.avi', 'output.mkv'],
   ])('%s with %s writes %s', (codec, input, outputFilename) => {
     expect(run(input, codec, { isKeepVideo: true }).outputFilename).toBe(outputFilename);
   });

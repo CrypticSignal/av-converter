@@ -126,9 +126,9 @@ interface Format {
   extension: string;
   /**
    * Set when the format can keep the input's video alongside the new audio:
-   * 'mp4' keeps an MP4 or MOV input's container (other inputs become MKV); 'mkv' always uses MKV.
+   * The output keeps the input's container if it can hold the format, and is MKV otherwise.
    */
-  keepVideo?: 'mp4' | 'mkv';
+  keepVideo?: true;
   /** Set when the audio is copied unchanged, so it can't be downmixed to stereo. */
   copiesAudio?: true;
   /** Set when the format can't hold more than two channels, so audio with more is always downmixed. */
@@ -157,7 +157,7 @@ export const FORMATS: Record<Codec, Format> = {
   AAC: {
     label: 'AAC',
     extension: '.aac',
-    keepVideo: 'mp4',
+    keepVideo: true,
     args: s => ['-c:a', 'aac', '-b:a', `${s.aacBitrate}k`],
     Panel: ({ settings, set }) =>
       <BitrateSlider value={settings.aacBitrate} onChange={v => set('aacBitrate', v)} min={32} max={256} step={32} />,
@@ -166,7 +166,7 @@ export const FORMATS: Record<Codec, Format> = {
   AC3: {
     label: 'AC3 (Dolby Digital)',
     extension: '.ac3',
-    keepVideo: 'mp4',
+    keepVideo: true,
     args: s => ['-c:a', 'ac3', '-b:a', `${s.ac3Bitrate}k`],
     Panel: ({ settings, set }) => <>
       <SettingNote>{MAX_6_CHANNELS}</SettingNote>
@@ -179,7 +179,7 @@ export const FORMATS: Record<Codec, Format> = {
   ALAC: {
     label: 'ALAC (.m4a)',
     extension: '.m4a',
-    keepVideo: 'mp4',
+    keepVideo: true,
     args: () => ['-c:a', 'alac'],
     Panel: NoSettings,
   },
@@ -194,7 +194,7 @@ export const FORMATS: Record<Codec, Format> = {
   DTS: {
     label: 'DTS (.dts)',
     extension: '.dts',
-    keepVideo: 'mkv',
+    keepVideo: true,
     // FFmpeg's DTS encoder is marked experimental, so it needs -strict -2.
     args: s => ['-c:a', 'dca', '-b:a', `${s.dtsBitrate}k`, '-strict', '-2'],
     Panel: ({ settings, set }) => <>
@@ -207,7 +207,7 @@ export const FORMATS: Record<Codec, Format> = {
   FLAC: {
     label: 'FLAC (.flac)',
     extension: '.flac',
-    keepVideo: 'mkv',
+    keepVideo: true,
     args: s => ['-c:a', 'flac', '-compression_level', s.flacCompression],
     Panel: ({ settings, set }) => <>
       <LabeledSlider id="flac_compression" label="Compression level" value={settings.flacCompression}
@@ -230,7 +230,7 @@ export const FORMATS: Record<Codec, Format> = {
     label: 'MP3 (.mp3)',
     extension: '.mp3',
     stereoOnly: true,
-    keepVideo: 'mp4',
+    keepVideo: true,
     args: s => {
       if (s.mp3EncodingType === 'vbr') return ['-c:a', 'libmp3lame', '-q:a', s.mp3VbrSetting];
       if (s.mp3EncodingType === 'abr') return ['-c:a', 'libmp3lame', '-abr', '1', '-b:a', `${s.mp3Bitrate}k`];
