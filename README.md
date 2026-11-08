@@ -1,5 +1,7 @@
 # Audio/video converter
 
+Try this web app at https://av-converter.com
+
 <div align="center">
   <img src="https://img.shields.io/badge/Node.js-0F9A41?style=for-the-badge&logo=node&color=black" alt="Node.js" />
   <img src="https://img.shields.io/badge/Express-0F9A41?style=for-the-badge&logo=express&color=black" alt="Express" />
@@ -8,7 +10,7 @@
   <img src="https://img.shields.io/badge/Docker-000000?style=for-the-badge&logo=docker&logoColor=0db7ed" alt="Docker" />
   <img src="https://img.shields.io/badge/Tailwind-black?style=for-the-badge&logo=tailwind-css&logoColor=38B2AC" alt="Tailwind" />
 
-  ![converter screenshot](screenshot.png)
+  <img src="screenshot.png" alt="converter screenshot" width="600" />
 </div>
 
 # Table of contents
