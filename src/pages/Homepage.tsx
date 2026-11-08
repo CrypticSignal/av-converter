@@ -175,7 +175,7 @@ const Homepage = (): React.JSX.Element => {
   // Settings with that applied, for working out the arguments.
   const effectiveSettings = hasVideoStream || !settings.isKeepVideo ? settings : { ...settings, isKeepVideo: false };
   // Whether the output can hold every audio track (MKA, or when keeping the video).
-  const allowsAll = allowsAllAudioTracks(codec, effectiveSettings);
+  const allowsAll = allowsAllAudioTracks(codec, effectiveSettings, file?.name);
   // Keeping the video makes the output about as large as the input, and the converted file is
   // held in memory until it's saved (about twice over at the peak), so warn when it's large
   // for this device's memory.

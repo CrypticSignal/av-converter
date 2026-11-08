@@ -49,7 +49,7 @@ Convert a file, or the audio in a video, to AAC, AC3, ALAC, DTS, FLAC, MP3, Opus
 
 - The output contains exactly one audio track: the first, unless you pick another once the file's information has loaded (the picker appears for files with several).
 - MKA, and outputs that keep the video, can instead hold all audio tracks. MKA does so by default.
-- Keeping the video copies it unchanged, and for MKV to MKV also copies the subtitles and attachments.
+- Keeping the video copies it unchanged, into the input's own container (e.g. MP4 stays MP4) when that container can hold the chosen audio format, and into MKV otherwise. For MKV to MKV it also copies the subtitles and attachments.
 
 ### Video
 
