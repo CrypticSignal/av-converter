@@ -6,7 +6,7 @@
  * The formats and their settings are defined in src/formats.tsx; this page only shows
  * whichever format is selected.
  */
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { convertFile, loadFFmpeg, OUT_OF_MEMORY_ADVICE, type ConvertedFile } from '../utils/convertFile';
 import { markConversionEnded, markConversionStarted, takeUnfinishedConversion } from '../utils/unfinishedConversion';
@@ -20,17 +20,15 @@ import { loadSettings, saveSettings } from '../utils/savedSettings';
 import { probeFile, type StreamInfo } from '../utils/probeFile';
 import MediaInfoPanel, { type MediaInfoState } from '../components/MediaInfoPanel';
 import { FORMATS, type Codec, type FormatSettings, type SetSetting } from '../formats';
-import {
-  CONTAINERS, VIDEO_AUDIO_FORMATS, VIDEO_ENCODERS, containerHoldsAudio, videoAudioEncodingOf, videoContainerOf, videoEncoderOf,
-} from '../videoEncoders';
+import { VideoEncoderSettings, VideoFormatPicker, useVideoAudioDefault } from '../components/VideoSettings';
 // General Components
 import Alert, { type AlertSeverity } from '../components/Alert';
 import Button from '../components/Button';
 import ChoiceGroup from '../components/ChoiceGroup';
+import DownmixControl from '../components/DownmixControl';
 import FileInput from '../components/FileInput';
 import VideoTrimmer from '../components/VideoTrimmer';
 import SelectField from '../components/SelectField';
-import SettingNote from '../components/SettingNote';
 import TextField from '../components/TextField';
 import YesNoRadio from '../components/YesNoRadio';
 // Images
@@ -43,6 +41,13 @@ import webAssemblyLogo from '../images/webassembly-25.png';
  */
 const deviceMemoryGB = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
 
+/**
+ * The input filename of a conversion the tab crashed during (almost always from running out
+ * of memory), read once when the page loads. Leaving the page normally clears the mark; see
+ * unfinishedConversion.ts. Cleared here once the converter has shown it.
+ */
+let crashedDuring = takeUnfinishedConversion();
+
 /** "song.final.wav" -> "song.final". Used as the default output filename. */
 const withoutExtension = (filename: string) =>
   filename.includes('.') ? filename.slice(0, filename.lastIndexOf('.')) : filename;
@@ -52,37 +57,6 @@ const trackLabel = (stream: StreamInfo) =>
   `Stream ${stream.index}`
   + (stream.codec ? ` (${stream.codec})` : '')
   + (stream.details.length ? ` — ${stream.details.join(', ')}` : '');
-
-/**
- * Call `onChange` whenever `value` changes, but not on the first render, so settings
- * restored from the last visit aren't overwritten by defaults.
- */
-const useOnChange = (value: string, onChange: () => void) => {
-  const previous = useRef(value);
-  useEffect(() => {
-    if (previous.current === value) return;
-    previous.current = value;
-    onChange();
-  });
-};
-
-/** A titled group of related settings within a step, e.g. a video's audio settings. */
-const Subsection = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <section className="mt-5 rounded-2xl bg-white/[0.03] ring-1 ring-white/[0.06] px-4 pt-3 pb-2">
-    <h3 className="text-left text-xs font-semibold uppercase tracking-wider text-slate-400">{title}</h3>
-    {children}
-  </section>
-);
-
-/** The frame rate and size options. Common values, all defaulting to the input's own. */
-const withOriginal = (values: string[], unit: string) =>
-  [['original', 'Original'] as const, ...values.map(value => [value, `${value} ${unit}`] as const)];
-const FPS_OPTIONS = withOriginal(['60', '50', '30', '25', '24', '15', '12', '10', '5'], 'fps');
-const WIDTH_OPTIONS = withOriginal(['3840', '2560', '1920', '1280', '1024', '854', '640', '480', '320'], 'px');
-const HEIGHT_OPTIONS = withOriginal(['2160', '1440', '1080', '720', '576', '480', '360', '240'], 'px');
-
-/** The "Video encoder" dropdown's options, grouped as in videoEncoders.tsx. */
-const VIDEO_ENCODER_OPTIONS = Object.entries(VIDEO_ENCODERS).map(([value, { label, group }]) => [value, label, group] as const);
 
 /** A numbered step in the converter card. */
 const Step = ({ n, title, children }: { n: number; title: string; children: React.ReactNode }) => (
@@ -103,7 +77,10 @@ const Homepage = (): React.JSX.Element => {
   // ---------------------------------------------------------------------------
 
   // The message box under the status (an error, "Converting", "Done!", ...).
-  const [alert, setAlert] = useState<{ severity: AlertSeverity; message: string } | null>(null);
+  // It starts by saying so if the tab crashed during a conversion (see crashedDuring).
+  const [alert, setAlert] = useState<{ severity: AlertSeverity; message: string } | null>(() => crashedDuring
+    ? { severity: 'error', message: `The conversion of ${crashedDuring} stopped because the browser ran out of memory. ${OUT_OF_MEMORY_ADVICE}` }
+    : null);
 
   // The chosen format (e.g. 'MP3') and every format's settings (see FormatSettings in formats.tsx).
   // Both start from what the visitor used last time. Passing loadSettings itself (not
@@ -167,14 +144,10 @@ const Homepage = (): React.JSX.Element => {
     return stopWorker;
   }, []);
 
-  // If the tab crashed during a conversion (almost always from running out of memory), say so
-  // when it's reloaded. Leaving the page normally clears the mark; see unfinishedConversion.ts.
+  // The crash has been reported, so coming back to this page later doesn't report it again.
+  // Then clear the mark whenever the visitor leaves the page normally.
   useEffect(() => {
-    const crashedDuring = takeUnfinishedConversion();
-    if (crashedDuring) {
-      setAlert({ severity: 'error', message:
-        `The conversion of ${crashedDuring} stopped because the browser ran out of memory. ${OUT_OF_MEMORY_ADVICE}` });
-    }
+    crashedDuring = null;
     window.addEventListener('pagehide', markConversionEnded);
     return () => window.removeEventListener('pagehide', markConversionEnded);
   }, []);
@@ -189,12 +162,9 @@ const Homepage = (): React.JSX.Element => {
   const inputFilename = file?.name ?? '';
   // The selected format's entry in formats.tsx: its label, extension, args, Panel and flags.
   const format = FORMATS[codec];
-  // Whether the video is re-encoded with one of VIDEO_ENCODERS, rather than converting the audio.
+  // Whether the video is re-encoded with one of VIDEO_ENCODERS (see VideoSettings.tsx), rather
+  // than converting the audio.
   const isVideo = settings.outputType === 'video';
-  // The chosen video encoder's entry in videoEncoders.tsx, and the container it's written to.
-  const videoEncoderName = videoEncoderOf(settings);
-  const videoEncoder = VIDEO_ENCODERS[videoEncoderName];
-  const videoContainer = videoContainerOf(settings);
   // The selected file's audio tracks, once ffprobe has read it.
   const audioStreams = mediaInfo?.status === 'ready'
     ? mediaInfo.info.streams.filter(stream => stream.type === 'audio') : [];
@@ -217,27 +187,12 @@ const Homepage = (): React.JSX.Element => {
   const afterTrim = offersTrim ? 1 : 0;
   // Whether there's audio in the output to pick a track for.
   const hasAudio = !isVideo || videoHasAudio(settings);
-  // Whether a video's audio is re-encoded, rather than kept as it is or left out.
-  const reencodesVideoAudio = isVideo && hasAudio
-    && (settings.videoAudio === 'encode' || Boolean(CONTAINERS[videoContainer].noAudioCopy));
-  // How a video's audio is encoded then: the container's fixed audio, or the chosen audio format.
-  const videoAudioEncoder = reencodesVideoAudio ? videoAudioEncodingOf(settings) : undefined;
-  // Downmix to stereo is offered when the audio is encoded, unless the container sets the
-  // channels itself (DV is always stereo, AMV always mono).
-  const offersDownmix = isVideo
-    ? Boolean(videoAudioEncoder && !videoAudioEncoder.args.includes('-ac'))
-    : !format.copiesAudio;
-  // Whether the audio encoder can't write more than two channels (e.g. MP3), so it's always downmixed.
-  const stereoOnly = isVideo ? Boolean(videoAudioEncoder?.stereoOnly) : Boolean(format.stereoOnly);
   // Change one setting, e.g. update('mp3Bitrate', '256'). It copies the settings object
   // rather than editing it, because React only notices a change when it gets a new object.
-  const update: SetSetting = (key, value) => setSettings(previous => ({ ...previous, [key]: value }));
+  const update = useCallback<SetSetting>((key, value) => setSettings(previous => ({ ...previous, [key]: value })), []);
 
-  // Picking a container sets the audio to its default: not re-encoded for MKV and NUT, which
-  // hold almost any audio format, else re-encoded. A choice to remove the audio is kept.
-  useOnChange(isVideo ? videoContainer : '', () => {
-    if (isVideo && settings.videoAudio !== 'none') update('videoAudio', CONTAINERS[videoContainer].defaultAudio ?? 'encode');
-  });
+  // Picking a video container sets its default audio handling.
+  useVideoAudioDefault(settings, update);
 
   // ---------------------------------------------------------------------------
   // Event handlers.
@@ -257,7 +212,7 @@ const Homepage = (): React.JSX.Element => {
     setAlert(null);
     // Suggest the input's name as the output name, e.g. "song.wav" -> "song".
     setOutputName(withoutExtension(currentFile.name));
-    // Start downloading FFmpeg (~30 MB) while the user picks settings. If it fails,
+    // Start downloading FFmpeg (about 12 MB compressed) while the user picks settings. If it fails,
     // it's tried again when they click Convert.
     const instance = ffmpegRef.current ?? new FFmpeg();
     ffmpegRef.current = instance;
@@ -376,19 +331,6 @@ const Homepage = (): React.JSX.Element => {
       ]} />
   );
 
-  // The chosen audio format's settings, when a video's audio is re-encoded to a format the user picks.
-  const VideoAudioPanel = videoAudioEncoder?.format && VIDEO_AUDIO_FORMATS[videoAudioEncoder.format].Panel;
-
-  // Downmix to stereo, only when the audio is encoded (see offersDownmix). Formats that can't
-  // hold more than two channels are always downmixed, so they get a note instead of the choice.
-  const downmixControl = offersDownmix && (stereoOnly ? (
-    <SettingNote>This audio format holds at most two channels, so audio with more will be downmixed to stereo.</SettingNote>
-  ) : (
-    <div>
-      <YesNoRadio name="downmix" label="Downmix to stereo?" value={settings.downmixToStereo}
-        onChange={value => update('downmixToStereo', value)} />
-    </div>
-  ));
   return (
     <div className="max-w-2xl mx-auto">
       {/* Page header. */}
@@ -454,15 +396,7 @@ const Homepage = (): React.JSX.Element => {
                   onChange={value => update('outputType', value)}
                   options={[['audio', 'Audio'], ['video', 'Video']]} className="mt-0 mb-4" />
 
-                {isVideo ? <>
-                  {/* "Video encoder" dropdown: every video encoder in FFmpeg's WebAssembly build, in groups. */}
-                  <SelectField id="video_encoder" label="Video encoder" value={videoEncoderName}
-                    onChange={value => update('videoEncoder', value)} options={VIDEO_ENCODER_OPTIONS} />
-                  {/* Only the containers this encoder can be written to. */}
-                  <SelectField id="video_container" label="Container" value={videoContainer}
-                    onChange={value => update('videoContainer', value)}
-                    options={videoEncoder.containers.map(name => [name, CONTAINERS[name].label] as const)} />
-                </> : (
+                {isVideo ? <VideoFormatPicker settings={settings} set={update} /> : (
                   // "Desired format" dropdown, with one option per entry in FORMATS, e.g. ['MP3', 'MP3 (.mp3)'].
                   <SelectField id="codecs" label="Desired format" value={codec}
                     onChange={value => setCodec(value as Codec)}
@@ -484,56 +418,9 @@ const Homepage = (): React.JSX.Element => {
               )}
 
               <Step n={3 + afterTrim} title="Encoder settings">
-                {isVideo ? <>
-                  {/* The video encoder's own controls and note, from videoEncoders.tsx. */}
-                  {videoEncoder.Panel && <videoEncoder.Panel settings={settings} set={update} />}
-                  {videoEncoder.note && <SettingNote>{videoEncoder.note}</SettingNote>}
-                  {!videoEncoder.Panel && !videoEncoder.note && <SettingNote>This encoder has no settings.</SettingNote>}
-
-                  {/* Frame rate and size, for every encoder. Left at Original, the input's are kept. */}
-                  <Subsection title="Frame rate and size">
-                    <SelectField id="video_fps" label="Frame rate" value={settings.videoFps}
-                      onChange={value => update('videoFps', value)} options={FPS_OPTIONS} />
-                    <SelectField id="video_width" label="Width" value={settings.videoWidth}
-                      onChange={value => update('videoWidth', value)} options={WIDTH_OPTIONS} />
-                    <SelectField id="video_height" label="Height" value={settings.videoHeight}
-                      onChange={value => update('videoHeight', value)} options={HEIGHT_OPTIONS} />
-                    <SettingNote>
-                      Set only the width or the height to keep the video's shape; setting both can stretch it.
-                      A lower frame rate makes a smaller file (10 to 15 fps is typical for GIFs); a higher
-                      one than the video's own repeats frames rather than making it smoother.
-                    </SettingNote>
-                  </Subsection>
-
-                  {/* The audio settings, unless the container can't hold audio (e.g. GIF). */}
-                  {containerHoldsAudio(videoContainer) && (
-                    <Subsection title="Audio">
-                      {/* Re-encode, keep as it is (where the container allows it), or remove the audio. */}
-                      <ChoiceGroup ariaLabel="Audio" name="video_audio"
-                        // Containers that can't keep the audio as it is always re-encode it.
-                        value={settings.videoAudio === 'copy' && CONTAINERS[videoContainer].noAudioCopy ? 'encode' : settings.videoAudio}
-                        onChange={value => update('videoAudio', value)}
-                        options={[
-                          // A container with only one audio format names it here; others offer a choice below.
-                          ['encode', CONTAINERS[videoContainer].fixedAudio ? `Re-encode (${CONTAINERS[videoContainer].fixedAudio.label})` : 'Re-encode'],
-                          ...(!CONTAINERS[videoContainer].noAudioCopy ? [['copy', 'Do not re-encode'] as const] : []),
-                          ['none', 'Remove the audio'],
-                        ]} />
-                      {settings.videoAudio === 'copy' && !CONTAINERS[videoContainer].noAudioCopy && (
-                        <SettingNote>This fails if the container can't hold the audio's format; re-encoding always works.</SettingNote>
-                      )}
-                      {/* The audio format, from those the container can hold (AAC where it can), and its settings. */}
-                      {videoAudioEncoder?.format && <>
-                        <SelectField id="video_audio_format" label="Audio format" value={videoAudioEncoder.format}
-                          onChange={value => update('videoAudioFormat', value)}
-                          options={CONTAINERS[videoContainer].audioFormats!.map(name => [name, VIDEO_AUDIO_FORMATS[name].label] as const)} />
-                        {VideoAudioPanel && <VideoAudioPanel settings={settings} set={update} />}
-                      </>}
-                      {hasAudio && audioTrackPicker}
-                      {downmixControl}
-                    </Subsection>
-                  )}
-                </> : <format.Panel settings={settings} set={update} />}
+                {isVideo
+                  ? <VideoEncoderSettings settings={settings} set={update} audioTrackPicker={audioTrackPicker} />
+                  : <format.Panel settings={settings} set={update} />}
 
                 {/* Options every format shares, shown only where they apply. */}
                 {/* Keep the input's video: only for formats that can go into a video file (keepVideo). */}
@@ -545,7 +432,9 @@ const Homepage = (): React.JSX.Element => {
                   </div>
                 )}
 
-                {!isVideo && downmixControl}
+                {/* Downmix to stereo, when the audio is encoded rather than copied. */}
+                {!isVideo && !format.copiesAudio && <DownmixControl stereoOnly={Boolean(format.stereoOnly)}
+                  value={settings.downmixToStereo} onChange={value => update('downmixToStereo', value)} />}
               </Step>
 
               <Step n={4 + afterTrim} title="Name the output">

@@ -20,6 +20,8 @@ jobs:
       - run: yarn install --frozen-lockfile
       # Type-checks with tsc, then bundles with Vite.
       - run: yarn build
+      # React hooks rules and other mistakes the type-checker can't see.
+      - run: yarn lint
       - run: yarn test
 
   downloader:

@@ -9,6 +9,7 @@ const MP4_FAMILY = ['.mp4', '.mov'];
  * a leading "-" would make FFmpeg read the name as an option.
  */
 export const sanitizeFilename = (name: string): string =>
+  // eslint-disable-next-line no-control-regex -- Control characters are what it replaces.
   name.trim().replace(/[/\\:*?"<>|\u0000-\u001f]/g, '_').replace(/^-/, '_');
 
 /**

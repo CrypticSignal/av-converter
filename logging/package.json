@@ -4,7 +4,8 @@
   "type": "module",
   "license": "MIT",
   "dependencies": {
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "maxmind": "^5.0.8"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

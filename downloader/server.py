@@ -29,6 +29,9 @@ DOWNLOAD_LINK_SECONDS = 10 * 60
 METADATA_TIMEOUT_SECONDS = 120
 PROGRESS_PREFIX = 'av-progress:'
 ALLOWED_DOMAINS = ('youtube.com', 'youtu.be', 'vimeo.com', 'tiktok.com')
+# How many downloads may run at once. Each runs yt-dlp and often FFmpeg, so a few at a time
+# keep the server responsive; further requests are refused until one finishes.
+MAX_CONCURRENT_DOWNLOADS = int(os.environ.get('MAX_CONCURRENT_DOWNLOADS', '3'))
 # Optional YouTube cookies: cookies.txt in the project root, or where the Compose files mount it.
 COOKIES_FILE = Path(os.environ.get('COOKIES_FILE') or Path(__file__).resolve().parent.parent / 'cookies.txt')
 YTDLP_ARGS = [
@@ -87,6 +90,7 @@ class DownloadFiles:
 
 
 DOWNLOAD_FILES = DownloadFiles()
+DOWNLOAD_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_DOWNLOADS)
 
 
 def check_free_space():
@@ -297,7 +301,13 @@ class DownloadHandler(BaseHTTPRequestHandler):
         if not check_password(password):
             self.error(401, 'Incorrect password.')
             return
-        self.download(url, download_type)
+        if not DOWNLOAD_SLOTS.acquire(blocking=False):
+            self.error(429, 'Too many downloads are in progress. Please try again in a few minutes.')
+            return
+        try:
+            self.download(url, download_type)
+        finally:
+            DOWNLOAD_SLOTS.release()
 
     def download(self, url, download_type):
         """Stream yt-dlp's progress to the browser, ending with a link to the file."""
