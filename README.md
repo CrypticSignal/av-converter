@@ -22,21 +22,32 @@ Convert audio and video files right in your browser using FFmpeg and WebAssembly
 # Table of contents
 
 - [Audio/Video Converter](#audiovideo-converter)
+- [Run locally](#run-locally)
+  - [With Docker](#with-docker)
+  - [Without Docker](#without-docker)
 - [Video Downloader](#video-downloader)
   - [YouTube cookies](#youtube-cookies)
   - [Password](#password)
   - [Limits](#limits)
-- [Run locally](#run-locally)
-  - [With Docker](#with-docker)
-  - [Without Docker](#without-docker)
 - [Production](#production)
 - [Tests](#tests)
 - [Benchmarking encoders](#benchmarking-encoders)
 - [Code layout](#code-layout)
+- [License](#license)
 
 ## Audio/Video Converter
 
-Convert audio files or the audio tracks in a video using FFmpeg in your browser. Supports AAC, AC3, ALAC, DTS, FLAC, MP3, Opus, Vorbis, and WAV. The output contains exactly one audio track: the first, unless you pick another once the file's information has loaded (the picker appears for files with several). MKA, and outputs that keep the video, can instead hold all audio tracks; MKA does so by default. Keeping the video copies it unchanged, and for MKV to MKV also copies the subtitles and attachments. Manual command mode uses your own stream mapping.
+Convert audio and video files in your browser. The conversion runs on your device with FFmpeg compiled to WebAssembly, so your file is not uploaded.
+
+- **Audio:** convert a file, or the audio in a video, to AAC, AC3, ALAC, DTS, FLAC, MP3, Opus, Vorbis, WAV and more, with each format's own settings.
+- **Video:** re-encode the video with H.264, H.265, AV1, VP9 and many other encoders, resize it, change the frame rate, or trim it.
+- **Audio tracks:** choose which audio track to convert, or keep them all.
+- **Manual mode:** type your own FFmpeg command.
+- **No input size limit:** FFmpeg reads the input straight from disk.
+
+### Details
+
+Audio output supports AAC, AC3, ALAC, DTS, FLAC, MP3, Opus, Vorbis, and WAV. The output contains exactly one audio track: the first, unless you pick another once the file's information has loaded (the picker appears for files with several). MKA, and outputs that keep the video, can instead hold all audio tracks; MKA does so by default. Keeping the video copies it unchanged, and for MKV to MKV also copies the subtitles and attachments. Manual command mode uses your own stream mapping.
 
 Choose **Video** instead of Audio to re-encode the video with any of the video encoders in FFmpeg's WebAssembly build (H.264, H.265, AV1, VP8, VP9, MPEG-4, Theora, ProRes, DNxHR, FFV1, GIF, animated WebP and PNG, and many older, uncompressed and image codecs). Each encoder offers only the containers it can be written to, and has its own quality settings where it has any. The audio can be re-encoded to any audio format the container can hold, with that format's settings (AAC by default where the container allows it), left as it is (the default for MKV and NUT, which hold almost any audio format), or removed. Audio formats that hold at most two channels, such as MP3, always downmix audio with more to stereo. Encoders that only allow certain frame sizes (such as DV, H.261 and H.263) resize the video to fit. Every encoder can also change the frame rate, width and height (all "Original" by default; with only the width or the height set, the other keeps the aspect ratio). To convert only part of the video, drag the start and end handles under the video preview. Browsers can't preview every format FFmpeg reads, but the handles still work then.
 
@@ -44,37 +55,9 @@ AV1 can be encoded with libaom or SVT-AV1, and AV1 input is decoded with dav1d. 
 
 There's no limit on the input file's size: FFmpeg reads it directly from disk. The converted file, though, is held in the browser's memory until it's saved (about twice over at the peak), so a very large output, such as a long video with "Keep the video", can make the browser run out of memory. The page warns about this beforehand (in browsers that report the device's memory), and explains it if the tab crashes during a conversion.
 
-## Video Downloader
-
-#### YouTube cookies
-
-If YouTube asks yt-dlp to sign in, export your YouTube cookies in Netscape format and save them as `cookies.txt` in the project root. Without the file, downloads are anonymous. Cookies are login credentials, so never commit them, and expect to replace them when they expire.
-
-#### Password
-
-The video downloader (`/download`) is private: it isn't linked from the site, and every download needs its password.
-
-**How it works**: the password's SHA-256 hash is kept on the server, in `downloader-password.env` in the project root, and never committed. Docker Compose passes it to the downloader as the `DOWNLOADER_PASSWORD_SHA256` environment variable. The download page sends the password with each download request, and the downloader hashes it and compares it with the saved hash. If no hash is set, every download is refused.
-
-**To set or change the password**, run this on the server, from the project root:
-
-```sh
-python3 set_password.py
-```
-
-It asks for the new password, saves its hash, and restarts the downloader if it's running, so the new password applies straight away. `setup.sh` runs it the first time, and `deploy.py` stops if no password has been set.
-
-Locally, run `python3 set_password.py` too. The Docker setup picks the file up automatically; without Docker, start the backend with `env $(cat downloader-password.env) python downloader/server.py`.
-
-#### Limits
-
-There's no limit on how many downloads run at once. Downloads have no file-size limit, and live recordings have no duration limit. A download stops if free disk space drops below 1 GiB.
-
-A completed download is kept for up to ten minutes. Its link can be used once; the file is removed when that transfer ends, or when the link expires.
-
 ## Run locally
 
-#### With Docker
+### With Docker
 
 ```sh
 docker compose -f docker/dev/docker-compose.yml up --build --watch
@@ -82,7 +65,7 @@ docker compose -f docker/dev/docker-compose.yml up --build --watch
 
 Open http://localhost:3000. Watch mode syncs frontend changes and restarts or rebuilds services when needed. Downloader rebuilds interrupt active downloads and recordings. Restart the command after changing the Compose configuration.
 
-#### Without Docker
+### Without Docker
 
 Install Python 3.12+, Node.js 26+, Yarn, and FFmpeg, with the executables on your PATH. Start the backend:
 
@@ -99,6 +82,38 @@ yarn dev
 ```
 
 Open http://localhost:3000. Vite proxies download requests to http://127.0.0.1:8000; set `DOWNLOADER_URL` to use another backend. Local downloads need the Vite development server, not the static preview server.
+
+## Video Downloader
+
+A separate page at `/download` that downloads a video or its audio from a link, using [yt-dlp](https://github.com/yt-dlp/yt-dlp) on the server. Unlike the converter, it runs on the server and is protected by a password. It isn't linked from the site.
+
+**To use it:** open `/download`, enter the password and the video's URL, choose what to download (best quality, audio only, MP4 or MP3), and click **Download**. Keep the page open until the file is ready.
+
+### YouTube cookies
+
+If YouTube asks yt-dlp to sign in, export your YouTube cookies in Netscape format and save them as `cookies.txt` in the project root. Without the file, downloads are anonymous. Cookies are login credentials, so never commit them, and expect to replace them when they expire.
+
+### Password
+
+Every download needs the downloader's password.
+
+**How it works**: the password's SHA-256 hash is kept on the server, in `downloader-password.env` in the project root, and never committed. Docker Compose passes it to the downloader as the `DOWNLOADER_PASSWORD_SHA256` environment variable. The download page sends the password with each download request, and the downloader hashes it and compares it with the saved hash. If no hash is set, every download is refused.
+
+**To set or change the password**, run this on the server, from the project root:
+
+```sh
+python3 set_password.py
+```
+
+It asks for the new password, saves its hash, and restarts the downloader if it's running, so the new password applies straight away. `setup.sh` runs it the first time, and `deploy.py` stops if no password has been set.
+
+Locally, run `python3 set_password.py` too. The Docker setup picks the file up automatically; without Docker, start the backend with `env $(cat downloader-password.env) python downloader/server.py`.
+
+### Limits
+
+There's no limit on how many downloads run at once. Downloads have no file-size limit, and live recordings have no duration limit. A download stops if free disk space drops below 1 GiB.
+
+A completed download is kept for up to ten minutes. Its link can be used once; the file is removed when that transfer ends, or when the link expires.
 
 ## Production
 
@@ -181,3 +196,7 @@ To add a video encoder:
 2. Add any settings it needs to `FormatSettings` and `DEFAULT_SETTINGS` in `src/formats.tsx`.
 3. Check that the cores can write each container you list. The encoder has to be in the build (see
    `vendor/ffmpeg-core/README.md`).
+
+## License
+
+[MIT](LICENSE)
