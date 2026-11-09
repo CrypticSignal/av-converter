@@ -60,13 +60,14 @@ enabled in FFmpeg's configure. FFmpeg is still n5.1.4, which supports all three.
      (`--disable-decoder=libaom_av1`).
    - It builds libaom for realtime mode only (`CONFIG_REALTIME_ONLY`). In WebAssembly, its "good"
      mode took about 13 times as long as realtime mode at the fastest setting, for a file about 6%
-     smaller and about 1 dB better on the benchmark clip.
+     smaller and about 1 dB better on the test clip.
 
    It works in both cores, unlike SVT-AV1, and was faster than SVT-AV1 for the same quality in the
-   multi-threaded core, on the two clips we tested. In Chromium, for 5 s of 720p, libaom at speed 6 (`-cpu-used 6`) made a file
-   the same size as SVT-AV1 at preset 10 with 1.5 dB higher PSNR, in half the time (15 s against
-   29 s); libaom at speed 8 took 5 s. To compare them yourself, see "Benchmarking encoders" in the
-   project README.
+   multi-threaded core, on the two clips we tested. In Chromium, for 5 s of 720p, libaom at speed 6
+   (`-cpu-used 6`) made a file the same size as SVT-AV1 at preset 10 with 1.5 dB higher PSNR, in
+   half the time (15 s against 29 s); libaom at speed 8 took 5 s. These numbers come from a
+   benchmark script that has since been removed. It is in the git history
+   (`git log --diff-filter=D -- scripts/benchmark-encoders.mjs`).
 
 A line-by-line walkthrough of the patches, and of how they apply, is in
 [`patches/README.md`](patches/README.md).

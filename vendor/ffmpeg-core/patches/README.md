@@ -117,7 +117,7 @@ Changes to `build/aom.sh`:
 - `-DCMAKE_BUILD_TYPE=Release`: libaom 3.x needs a build type set.
 - `-DCONFIG_AV1_DECODER=0`: no decoder, since dav1d decodes.
 - `-DCONFIG_REALTIME_ONLY=1`: only realtime mode. In WebAssembly, the "good" mode took about 13
-  times as long, for about 1 dB better quality on the test clip used for the benchmark.
+  times as long, for about 1 dB better quality on the test clip.
 
 ## Viewing the changes as commits
 
