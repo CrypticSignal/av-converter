@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FFmpeg } from '@ffmpeg/ffmpeg';
+import { downloadFile } from './downloadFile';
+import { parseRange } from './readFileRange';
 
 // Fetching a core returns its own URL, so a test can tell which core was loaded.
 const toBlobURL = vi.fn(async (url: string) => url);
@@ -50,8 +52,41 @@ class FakeFFmpeg {
   mount = async () => true;
   unmount = async () => true;
   exec = async () => (this.behaviour.exec ? this.behaviour.exec(this.core!) : 0);
-  readFile = async () => new Uint8Array([1, 2, 3]);
+  /** The converted file's bytes. */
+  output = new Uint8Array([1, 2, 3]);
+  /** The byte ranges read from the output, as [offset, length]. */
+  rangeReads: [number, number][] = [];
+  readFile = async (_path: string, encoding?: string) => {
+    const range = parseRange(encoding);
+    if (!range) return this.output.slice();
+    this.rangeReads.push([range.offset, range.length]);
+    return this.output.slice(range.offset, range.offset + range.length);
+  };
 }
+
+/** A file chosen in the save dialog, recording what's written to it. */
+const fakeSaveFile = ({ failWrite = false } = {}) => {
+  const written: Uint8Array[] = [];
+  const writable = {
+    write: vi.fn(async (chunk: Uint8Array) => {
+      if (failWrite) throw new DOMException('Not enough space', 'QuotaExceededError');
+      written.push(chunk);
+    }),
+    close: vi.fn(async () => {}),
+    abort: vi.fn(async () => {}),
+  };
+  const handle = { name: 'out.mp3', createWritable: async () => writable } as unknown as FileSystemFileHandle;
+  /** Whether everything written, in order, is exactly `expected`. */
+  const holds = (expected: Uint8Array) => {
+    let offset = 0;
+    for (const chunk of written) {
+      if (chunk.some((byte, i) => byte !== expected[offset + i])) return false;
+      offset += chunk.length;
+    }
+    return offset === expected.length;
+  };
+  return { handle, writable, written, holds };
+};
 const asFFmpeg = (fake: FakeFFmpeg) => fake as unknown as FFmpeg;
 
 /** A fresh copy of the module, as its record of failed threads lasts for the page's lifetime. */
@@ -146,7 +181,7 @@ describe('loadFFmpeg', () => {
 });
 
 describe('convertFile', () => {
-  const run = async (ffmpeg: FakeFFmpeg) => {
+  const run = async (ffmpeg: FakeFFmpeg, saveTo?: FileSystemFileHandle) => {
     const { convertFile } = await importFresh();
     const alerts: [string, string][] = [];
     const statuses: string[] = [];
@@ -161,6 +196,7 @@ describe('convertFile', () => {
       onStatus: ({ stage }) => statuses.push(stage),
       onLog: () => {},
       onOutput,
+      saveTo,
     });
     return { alerts, statuses, onOutput };
   };
@@ -261,6 +297,57 @@ describe('convertFile', () => {
       const { statuses } = await conversion;
       expect(ffmpeg.terminations).toBe(0);
       expect(statuses.at(-1)).toBe('Conversion complete');
+    });
+  });
+
+  describe('saving to a file chosen in the save dialog', () => {
+    it('writes the output a chunk at a time instead of downloading it', async () => {
+      const { SAVE_CHUNK_BYTES } = await importFresh();
+      const ffmpeg = new FakeFFmpeg();
+      ffmpeg.output = new Uint8Array(SAVE_CHUNK_BYTES + 5).map((_, i) => i % 251);
+      const save = fakeSaveFile();
+      vi.mocked(downloadFile).mockClear();
+      const { alerts, statuses, onOutput } = await run(ffmpeg, save.handle);
+      expect(ffmpeg.rangeReads).toEqual([[0, SAVE_CHUNK_BYTES], [SAVE_CHUNK_BYTES, SAVE_CHUNK_BYTES]]);
+      expect(save.written.map(chunk => chunk.length)).toEqual([SAVE_CHUNK_BYTES, 5]);
+      expect(save.holds(ffmpeg.output)).toBe(true);
+      expect(save.writable.close).toHaveBeenCalledOnce();
+      expect(onOutput).not.toHaveBeenCalled();
+      expect(downloadFile).not.toHaveBeenCalled();
+      expect(alerts.at(-1)).toEqual(['success', expect.stringMatching(/Saved out\.mp3/)]);
+      expect(statuses).toContain('Saving');
+      expect(statuses.at(-1)).toBe('Conversion complete');
+    });
+
+    it('stops at the end of a file that is a whole number of chunks', async () => {
+      const { SAVE_CHUNK_BYTES } = await importFresh();
+      const ffmpeg = new FakeFFmpeg();
+      ffmpeg.output = new Uint8Array(SAVE_CHUNK_BYTES).fill(7);
+      const save = fakeSaveFile();
+      await run(ffmpeg, save.handle);
+      expect(ffmpeg.rangeReads).toHaveLength(2);
+      expect(save.written.map(chunk => chunk.length)).toEqual([SAVE_CHUNK_BYTES]);
+      expect(save.writable.close).toHaveBeenCalledOnce();
+    });
+
+    it('discards a partly written file when writing fails', async () => {
+      const ffmpeg = new FakeFFmpeg();
+      const save = fakeSaveFile({ failWrite: true });
+      const { alerts, statuses } = await run(ffmpeg, save.handle);
+      expect(save.writable.abort).toHaveBeenCalledOnce();
+      expect(save.writable.close).not.toHaveBeenCalled();
+      expect(alerts.at(-1)).toEqual(['error', expect.stringMatching(/Not enough space/)]);
+      expect(statuses.at(-1)).toBe('Conversion failed');
+    });
+
+    it('saves once after retrying single-threaded', async () => {
+      const ffmpeg = new FakeFFmpeg({ exec: crashWith('mt') });
+      const save = fakeSaveFile();
+      const { alerts } = await run(ffmpeg, save.handle);
+      expect(ffmpeg.loads).toEqual(['mt', 'st']);
+      expect(save.writable.close).toHaveBeenCalledOnce();
+      expect(save.holds(ffmpeg.output)).toBe(true);
+      expect(alerts.at(-1)?.[0]).toBe('success');
     });
   });
 

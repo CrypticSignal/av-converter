@@ -65,6 +65,10 @@ AV1 can be encoded with libaom or SVT-AV1, and AV1 input is decoded with dav1d (
 
 Tick **Write my own FFmpeg command** to type everything after `ffmpeg -i <input>` yourself. Manual command mode uses your own stream mapping.
 
+### Saving the converted file
+
+In desktop Chrome, Edge and Opera, clicking **Convert** first asks where to save the converted file. It's then written there a chunk at a time, rather than copied out of FFmpeg's worker whole to be downloaded. Closing the dialog doesn't start the conversion. Other browsers (and Chrome on Android) download the file instead.
+
 ### File size and memory
 
 There's no limit on the input file's size: FFmpeg reads it directly from disk. The converted file, though, is held in the browser's memory until it's saved (about twice over at the peak), so a very large output, such as a long video with "Keep the video", can make the browser run out of memory. The page warns about this beforehand (in browsers that report the device's memory), and explains it if the tab crashes during a conversion.
@@ -193,7 +197,9 @@ GitHub Actions runs both suites, the linter (which also type-checks the scripts)
 | `src/videoEncoders.tsx` | One entry per video encoder: its label, the containers it can be written to, its FFmpeg arguments and settings panel. |
 | `src/components/` | Small shared form controls (select, slider, yes/no radio, file input), the status panel, and the video trimmer. |
 | `src/utils/createFFmpegArgs.ts` | Builds the full FFmpeg command: which streams to include (`-map`), the format's arguments, and the shared options (keep the video, downmix to stereo). |
-| `src/utils/convertFile.ts` | Runs FFmpeg (WebAssembly) in the browser and downloads the result. |
+| `src/utils/convertFile.ts` | Runs FFmpeg (WebAssembly) in the browser, and saves the result where the visitor chose or downloads it. |
+| `src/utils/ffmpegWorker.ts` | The worker that runs the FFmpeg core: a copy of ffmpeg.wasm's own, which can also read part of a file, so the output can be saved a chunk at a time (`readFileRange.ts`). |
+| `src/utils/saveFilePicker.ts` | The browser's "Save as" dialog, where the browser has one. |
 | `src/pages/Homepage.tsx` | The converter page. |
 | `src/utils/manualCommand.ts` | Checks and builds the arguments for a manual FFmpeg command. |
 | `src/pages/DownloadPage.tsx` | The video downloader page, which streams progress from the backend. |

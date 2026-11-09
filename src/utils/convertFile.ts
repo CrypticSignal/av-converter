@@ -8,9 +8,12 @@ import singleThreadWasmURL from '../../vendor/ffmpeg-core/st/ffmpeg-core.wasm?ur
 import multiThreadCoreURL from '../../vendor/ffmpeg-core/mt/ffmpeg-core.js?url';
 import multiThreadWasmURL from '../../vendor/ffmpeg-core/mt/ffmpeg-core.wasm?url';
 import multiThreadWorkerURL from '../../vendor/ffmpeg-core/mt/ffmpeg-core.worker.js?url';
+// Our own copy of ffmpeg.wasm's worker, which can also read part of a file (see ffmpegWorker.ts).
+import ffmpegWorkerURL from './ffmpegWorker?worker&url';
 import type { AlertSeverity } from '../components/Alert';
-import { nonnegative, OperationProgress } from './progress';
+import { formatBytes, nonnegative, OperationProgress } from './progress';
 import { downloadFile } from './downloadFile';
+import { readFileRange } from './readFileRange';
 
 const loads = new WeakMap<FFmpeg, Promise<void>>();
 /** Instances whose load has succeeded (their promise in `loads` has resolved). */
@@ -98,7 +101,7 @@ const loadCore = async (ffmpeg: FFmpeg, threads: boolean, isActive: () => boolea
     const [coreURL, wasmURL, workerURL] = urls;
     // The single-threaded core has no worker file.
     try {
-      await ffmpeg.load({ coreURL, wasmURL, ...(workerURL && { workerURL }) });
+      await ffmpeg.load({ classWorkerURL: ffmpegWorkerURL, coreURL, wasmURL, ...(workerURL && { workerURL }) });
     } catch (error) {
       throw new CoreStartError(error);
     }
@@ -165,9 +168,16 @@ export interface ConversionJob {
   onLog: (message: string) => void;
   /**
    * Receives the converted file's object URL after its download starts, so the page can
-   * offer it again. The receiver then owns the URL and must revoke it.
+   * offer it again. The receiver then owns the URL and must revoke it. Not called when the
+   * file is saved to `saveTo`.
    */
   onOutput: (output: ConvertedFile) => void;
+  /**
+   * Where the visitor chose to save the converted file (see saveFilePicker.ts). It's written
+   * there a chunk at a time, so it's never held whole outside FFmpeg's worker. Without it, the
+   * file is downloaded, which needs about twice its size in memory at the peak.
+   */
+  saveTo?: FileSystemFileHandle;
 }
 
 export interface ConvertedFile {
@@ -185,6 +195,39 @@ export interface ConvertedFile {
  */
 export const STALL_TIMEOUT_MS = 120_000;
 
+/**
+ * How much of the converted file is moved out of FFmpeg's worker at a time when saving it to
+ * disk. Large enough that a few GB takes few requests, small enough to add little to memory use.
+ */
+export const SAVE_CHUNK_BYTES = 32 * 1024 ** 2;
+
+/**
+ * Copy FFmpeg's output file to the file the visitor chose, a chunk at a time, and return its size.
+ * A failed save doesn't leave a partly written file: Chrome writes to a temporary file, and only
+ * replaces the chosen file with it on close(). abort() discards it.
+ */
+const saveOutput = async (ffmpeg: FFmpeg, path: string, saveTo: FileSystemFileHandle,
+  report: (value: OperationProgress) => void, checkActive: () => void) => {
+  const writable = await saveTo.createWritable();
+  let saved = 0;
+  try {
+    for (;;) {
+      const chunk = await withTimeout(ffmpeg, readFileRange(ffmpeg, path, saved, SAVE_CHUNK_BYTES));
+      checkActive();
+      if (chunk.length > 0) await writable.write(chunk);
+      saved += chunk.length;
+      report({ stage: 'Saving', detail: `${formatBytes(saved)} saved` });
+      // A short chunk is the end of the file.
+      if (chunk.length < SAVE_CHUNK_BYTES) break;
+    }
+    await writable.close();
+  } catch (error) {
+    await writable.abort().catch(() => {});
+    throw error;
+  }
+  return saved;
+};
+
 /** Why a conversion is tried again on the single-threaded core. */
 type RetryReason = 'crashed' | 'stalled';
 
@@ -199,7 +242,7 @@ export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
 
 const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, retryReason?: RetryReason): Promise<RetryReason | void> => {
   const isRetry = retryReason !== undefined;
-  const { file, ffmpegArgs, outputFilename, knownTimeline, outputDuration, isActive, onAlert, onStatus, onLog, onOutput } = job;
+  const { file, ffmpegArgs, outputFilename, knownTimeline, outputDuration, isActive, onAlert, onStatus, onLog, onOutput, saveTo } = job;
   const inputFilename = file.name;
   let retry: RetryReason | undefined;
   // Whether the multi-threaded core failed to start just now, so the single-threaded one is used.
@@ -309,6 +352,12 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, retryReason?: Ret
     }
     checkActive();
     if (exitCode !== 0) throw new Error(`FFmpeg exited with code ${exitCode}`);
+    if (saveTo) {
+      const size = await saveOutput(ffmpeg, outputFilename, saveTo, report, checkActive);
+      onAlert('success', `Done! Saved ${saveTo.name} (${formatBytes(size)}).`);
+      report({ stage: 'Conversion complete' });
+      return retry;
+    }
     report({ stage: 'Preparing output' });
     // Copying a large output out of the worker is where memory most often runs out.
     const fileData = await withTimeout(ffmpeg, ffmpeg.readFile(outputFilename));

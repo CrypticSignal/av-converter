@@ -18,6 +18,7 @@ import { manualCommandArgs, videoThreadArgs } from '../utils/manualCommand';
 import { formatBytes } from '../utils/progress';
 import { loadSettings, saveSettings } from '../utils/savedSettings';
 import { probeFile, type StreamInfo } from '../utils/probeFile';
+import { canPickSaveFile, pickSaveFile } from '../utils/saveFilePicker';
 import MediaInfoPanel, { type MediaInfoState } from '../components/MediaInfoPanel';
 import { FORMATS, type Codec, type FormatSettings, type SetSetting } from '../formats';
 import { VideoEncoderSettings, VideoFormatPicker, useVideoAudioDefault } from '../components/VideoSettings';
@@ -40,6 +41,12 @@ import webAssemblyLogo from '../images/webassembly-25.png';
  * Only Chrome and Edge report it (undefined elsewhere).
  */
 const deviceMemoryGB = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+
+/**
+ * Whether this browser saves converted files to disk with a "Save as" dialog, a chunk at a time
+ * (see saveFilePicker.ts). If not, they're downloaded, which needs about twice as much memory.
+ */
+const savesToDisk = canPickSaveFile();
 
 /**
  * The input filename of a conversion the tab crashed during (almost always from running out
@@ -177,10 +184,10 @@ const Homepage = (): React.JSX.Element => {
   // Whether the output can hold every audio track (MKA, or when keeping the video).
   const allowsAll = allowsAllAudioTracks(codec, effectiveSettings, file?.name);
   // Keeping the video makes the output about as large as the input, and the converted file is
-  // held in memory until it's saved (about twice over at the peak), so warn when it's large
-  // for this device's memory.
+  // held in memory until it's saved, so warn when it's large for this device's memory. At the
+  // peak, a download holds it about twice over, and saving to disk about once.
   const largeForDevice = !manualMode && !isVideo && file !== undefined && keepsVideo
-    && deviceMemoryGB !== undefined && file.size > deviceMemoryGB * 1024 ** 3 / 4;
+    && deviceMemoryGB !== undefined && file.size > deviceMemoryGB * 1024 ** 3 / (savesToDisk ? 2 : 4);
   // The audio track that will be converted: the user's choice, else all tracks for MKA and the
   // first track for every other format. "All" falls back to the first track if the user then
   // switches to a format that holds only one.
@@ -244,7 +251,7 @@ const Homepage = (): React.JSX.Element => {
     setStatus({ stage: 'Cancelled' });
   };
 
-  const onConvertClicked = () => {
+  const onConvertClicked = async () => {
     // Ignore clicks while a conversion is running.
     if (session.current) return;
     if (file === undefined) {
@@ -275,15 +282,25 @@ const Homepage = (): React.JSX.Element => {
       return;
     }
 
+    // Mark this conversion as the current one. isActive() turns false if it's cancelled
+    // or the page closes, and convertFile then stops reporting progress. Marked before asking
+    // where to save, so another click or a new file is ignored while the dialog is open.
+    const currentSession = {};
+    session.current = currentSession;
+
+    // Ask where to save the converted file, in browsers that can save it to disk. This must
+    // be now: the dialog is only allowed straight after a click. Without one, it's downloaded.
+    const saveTo = await pickSaveFile(outputFilename);
+    if (saveTo === 'cancelled' || session.current !== currentSession) {
+      if (session.current === currentSession) session.current = null;
+      return;
+    }
+
     // Show the command as it would be typed in a terminal.
     setFfmpegCommand(`ffmpeg ${formatCommand(ffmpegArgs)}`);
     // FFmpeg is null after a cancel, so create a new instance if needed.
     const ffmpeg = ffmpegRef.current ?? new FFmpeg();
     ffmpegRef.current = ffmpeg;
-    // Mark this conversion as the current one. isActive() turns false if it's cancelled
-    // or the page closes, and convertFile then stops reporting progress.
-    const currentSession = {};
-    session.current = currentSession;
     const isActive = () => session.current === currentSession && ffmpegRef.current === ffmpeg;
     setLogs('');
     setOutput(null);
@@ -294,6 +311,7 @@ const Homepage = (): React.JSX.Element => {
       file,
       ffmpegArgs,
       outputFilename,
+      saveTo,
       // A manual command might change the output's length (e.g. by trimming), so the
       // input's duration can't be used to show a percentage.
       knownTimeline: !manualMode,
@@ -469,7 +487,7 @@ const Homepage = (): React.JSX.Element => {
 
         {/* Hidden rather than removed during a conversion, so the page layout doesn't jump. */}
         <div className={`mt-6 ${!isConverting ? 'block' : 'hidden'}`}>
-          <Button onClick={onConvertClicked} className="w-full py-3 text-[1.05rem]">
+          <Button onClick={() => void onConvertClicked()} className="w-full py-3 text-[1.05rem]">
             Convert
           </Button>
         </div>

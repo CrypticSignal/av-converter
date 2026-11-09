@@ -65,6 +65,11 @@ export default defineConfig({
   build: {
     outDir: 'build'
   },
+  // FFmpeg.load() starts our FFmpeg worker (src/utils/ffmpegWorker.ts) as a module worker, and it
+  // imports the core, so bundle it as an ES module.
+  worker: {
+    format: 'es',
+  },
   optimizeDeps: {
     exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'],
   },
