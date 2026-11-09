@@ -19,7 +19,7 @@ hardware decoder, which WebAssembly doesn't have, so converting AV1 video fails 
 
 These files are upstream's own production builds (`make prd` and `make prd-mt`) of ffmpeg.wasm
 commit [`f876f90`](https://github.com/ffmpegwasm/ffmpeg.wasm/commit/f876f907c7e9b9bf51d4ed0b913a855a63ae63fc)
-(16 September 2025), with the patches in `patches/` applied (see below). Only the ES module files
+(September 2025), with the patches in `patches/` applied (see below). Only the ES module files
 are kept, as that's all the app uses. The JavaScript API is the same as 0.12.10's, so they work with
 `@ffmpeg/ffmpeg` 0.12.x.
 
