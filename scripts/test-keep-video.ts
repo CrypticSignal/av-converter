@@ -211,6 +211,9 @@ const checkOutput = (file: string, name: string, container: string, format: stri
 /** Convert the sample to `format` in the converter, and check the result. */
 const testPairing = async (container: string, format: string, input: string, inputVideo: string | undefined): Promise<Outcome> => {
   const page = await browser.newPage({ acceptDownloads: true });
+  // Even headless Chromium has the "Save as" dialog, which the converter would wait on forever
+  // (nothing can answer it here). Without it, the converter downloads the file, as checked here.
+  await page.addInitScript(() => Object.defineProperty(window, 'showSaveFilePicker', { value: undefined }));
   try {
     const conversion = await convertInPage(page, input, format);
 
