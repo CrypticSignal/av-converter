@@ -161,13 +161,29 @@ Run frontend tests:
 yarn test
 ```
 
-Lint the frontend with ESLint, including React's hooks rules:
+Lint the frontend with ESLint, including React's hooks rules, and type-check the scripts in `scripts/`:
 
 ```sh
 yarn lint
 ```
 
-GitHub Actions runs both suites, the linter and the frontend build on every push to master and on pull requests.
+Two scripts in `scripts/` test the converter in a real browser (Chromium, through Playwright), against the production build. CI doesn't run them:
+
+```sh
+yarn build
+npx playwright install chromium   # once
+
+# Tests "Keep the video" for every container and audio format that offers it.
+# Needs ffmpeg and ffprobe on your PATH.
+node scripts/test-keep-video.ts
+
+# Checks which video encoders hang on the multi-threaded core without -threads 4.
+node scripts/test-threads.ts path/to/video.mp4
+```
+
+Both print one line per case and a summary. `test-keep-video` exits with 1 if any case fails; `--containers mp4,avi` and `--formats AAC,MP3` limit what it tests. `test-threads` also takes `--only libx264,gif`, `--rounds` and `--timeout`. Each script's header comment lists all its options.
+
+GitHub Actions runs both suites, the linter (which also type-checks the scripts) and the frontend build on every push to master and on pull requests.
 
 ## Code layout
 
@@ -181,6 +197,8 @@ GitHub Actions runs both suites, the linter and the frontend build on every push
 | `src/pages/Homepage.tsx` | The converter page. |
 | `src/utils/manualCommand.ts` | Checks and builds the arguments for a manual FFmpeg command. |
 | `src/pages/DownloadPage.tsx` | The video downloader page, which streams progress from the backend. |
+| `scripts/test-keep-video.ts` | Tests "Keep the video" for every container and audio format that offers it, in Chromium (see Tests). |
+| `scripts/test-threads.ts` | Checks which video encoders need `-threads 4` on the multi-threaded FFmpeg core, in Chromium (see Tests). |
 | `downloader/server.py` | The yt-dlp backend. |
 | `set_password.py` | Sets the downloader's password, saving its hash in `downloader-password.env`. |
 | `docker/prod/nginx.conf`, `nginx-http.conf` | Nginx for HTTPS, and HTTP only (local mode and first certificate). Both include `locations.conf`, the site's routes, which adds the security headers in `security-headers.conf` and `app-headers.conf`. |

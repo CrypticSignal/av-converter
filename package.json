@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
   "dependencies": {
     "@base-ui/react": "1.9.0",
     "@ffmpeg/ffmpeg": "^0.12.15",
@@ -16,7 +19,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "lint": "eslint .",
+    "lint": "eslint . && tsc -p scripts",
     "deploy": "python3 deploy.py",
     "docker-dev": "docker compose -f docker/dev/docker-compose.yml up --build --watch",
     "docker-logs": "docker compose -f docker/prod/docker-compose.yml logs -f",
