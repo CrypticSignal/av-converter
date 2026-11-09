@@ -71,7 +71,9 @@ In desktop Chrome, Edge and Opera, clicking **Convert** first asks where to save
 
 ### File size and memory
 
-There's no limit on the input file's size: FFmpeg reads it directly from disk. The converted file, though, is held in the browser's memory until it's saved (about twice over at the peak), so a very large output, such as a long video with "Keep the video", can make the browser run out of memory. The page warns about this beforehand (in browsers that report the device's memory), and explains it if the tab crashes during a conversion.
+There's no limit on the input file's size: FFmpeg reads it directly from disk. The converted file, though, is held in the browser's memory until it's saved, so a very large output, such as a long video with "Keep the video", can make the browser run out of memory. The page warns about this beforehand (in browsers that report the device's memory), and explains it if the tab crashes during a conversion.
+
+Saving with the dialog (above) needs less memory than downloading. Converting a 600 MB WAV file to WAV in headless Chromium raised its memory use by about 2.3 GB at the peak when downloaded, and by about 1.4 GB when saved. Most of what's left is FFmpeg's in-memory copy of the output while it's written, which grows by being copied into ever larger buffers.
 
 ## Run locally
 

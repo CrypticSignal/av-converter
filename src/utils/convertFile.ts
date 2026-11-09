@@ -174,8 +174,8 @@ export interface ConversionJob {
   onOutput: (output: ConvertedFile) => void;
   /**
    * Where the visitor chose to save the converted file (see saveFilePicker.ts). It's written
-   * there a chunk at a time, so it's never held whole outside FFmpeg's worker. Without it, the
-   * file is downloaded, which needs about twice its size in memory at the peak.
+   * there a chunk at a time, so it's never copied whole out of FFmpeg's worker. Without it, the
+   * file is downloaded: copied out whole, then copied again into a Blob.
    */
   saveTo?: FileSystemFileHandle;
 }

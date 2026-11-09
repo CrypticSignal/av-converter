@@ -44,7 +44,7 @@ const deviceMemoryGB = (navigator as Navigator & { deviceMemory?: number }).devi
 
 /**
  * Whether this browser saves converted files to disk with a "Save as" dialog, a chunk at a time
- * (see saveFilePicker.ts). If not, they're downloaded, which needs about twice as much memory.
+ * (see saveFilePicker.ts). If not, they're downloaded, which needs more memory (see largeForDevice).
  */
 const savesToDisk = canPickSaveFile();
 
@@ -184,10 +184,11 @@ const Homepage = (): React.JSX.Element => {
   // Whether the output can hold every audio track (MKA, or when keeping the video).
   const allowsAll = allowsAllAudioTracks(codec, effectiveSettings, file?.name);
   // Keeping the video makes the output about as large as the input, and the converted file is
-  // held in memory until it's saved, so warn when it's large for this device's memory. At the
-  // peak, a download holds it about twice over, and saving to disk about once.
+  // held in memory until it's saved, so warn when it's large for this device's memory. Converting
+  // a 600 MB file in Chromium took about 3.8 times its size in memory at the peak when downloaded,
+  // and about 2.4 times when saved to disk, so saving can handle files about 1.5 times as large.
   const largeForDevice = !manualMode && !isVideo && file !== undefined && keepsVideo
-    && deviceMemoryGB !== undefined && file.size > deviceMemoryGB * 1024 ** 3 / (savesToDisk ? 2 : 4);
+    && deviceMemoryGB !== undefined && file.size > deviceMemoryGB * 1024 ** 3 / (savesToDisk ? 2.5 : 4);
   // The audio track that will be converted: the user's choice, else all tracks for MKA and the
   // first track for every other format. "All" falls back to the first track if the user then
   // switches to a format that holds only one.
