@@ -1,0 +1,73 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>thread test</title>
+<!--
+  The page that test-threads.ts opens. It loads FFmpeg through @ffmpeg/ffmpeg, as the converter
+  does, and defines window.convert() for the script to call. The script copies this file, the
+  library and the core into one folder and serves it (see test-threads.ts).
+-->
+<script type="module">
+import { FFmpeg } from './ffmpeg/index.js';
+import { toBlobURL } from './util/index.js';
+
+// Runs one conversion on a fresh FFmpeg instance, so a hang in one run can't affect the next.
+// It always returns a result: an error becomes a "failed" result.
+window.convert = async (inputName, args, outName, timeoutMs) => {
+  try {
+    const ffmpeg = new FFmpeg();
+
+    // Keep FFmpeg's log, to report why a run failed.
+    const log = [];
+    ffmpeg.on('log', ({ message }) => log.push(message));
+
+    // Load the multi-threaded core from the files next to this page.
+    await ffmpeg.load({
+      coreURL: await toBlobURL('core/ffmpeg-core.js', 'text/javascript'),
+      wasmURL: await toBlobURL('core/ffmpeg-core.wasm', 'application/wasm'),
+      workerURL: await toBlobURL('core/ffmpeg-core.worker.js', 'text/javascript'),
+    });
+
+    // Give FFmpeg the input file, which the script put next to this page.
+    await ffmpeg.writeFile(inputName, new Uint8Array(await (await fetch(inputName)).arrayBuffer()));
+
+    // Run FFmpeg, and count the run as a hang if it hasn't finished when the timeout is up.
+    const started = performance.now();
+    const result = await Promise.race([
+      ffmpeg.exec(args).then(code => ({ code })),
+      new Promise(resolve => setTimeout(() => resolve({ timedOut: true }), timeoutMs)),
+    ]);
+    const seconds = (performance.now() - started) / 1000;
+
+    // The output's size, if FFmpeg succeeded.
+    let bytes = 0;
+    if (result.code === 0) {
+      try { bytes = (await ffmpeg.readFile(outName)).length; } catch {}
+    }
+
+    // The last two log lines that look like errors (ignoring the "Aborted()" that ends a crash).
+    const errors = log.filter(line => /error|invalid|failed/i.test(line) && !/^Aborted\(\)$/.test(line)).slice(-2);
+
+    // Shut this FFmpeg instance down, including a hung one.
+    ffmpeg.terminate();
+
+    return {
+      outcome: result.timedOut ? 'hung' : result.code === 0 && bytes > 0 ? 'ok' : 'failed',
+      seconds: Math.round(seconds * 10) / 10,
+      bytes,
+      crossOriginIsolated: globalThis.crossOriginIsolated,
+      errors,
+    };
+  } catch (error) {
+    return {
+      outcome: 'failed',
+      seconds: 0,
+      bytes: 0,
+      crossOriginIsolated: globalThis.crossOriginIsolated,
+      errors: [String(error?.stack ?? error).split('\n').slice(0, 3).join(' | ')],
+    };
+  }
+};
+
+// Tell the script that convert() can be called.
+window.ready = true;
+</script>
