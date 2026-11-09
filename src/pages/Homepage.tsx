@@ -184,11 +184,12 @@ const Homepage = (): React.JSX.Element => {
   // Whether the output can hold every audio track (MKA, or when keeping the video).
   const allowsAll = allowsAllAudioTracks(codec, effectiveSettings, file?.name);
   // Keeping the video makes the output about as large as the input, and the converted file is
-  // held in memory until it's saved, so warn when it's large for this device's memory. Converting
-  // a 600 MB file in Chromium took about 3.8 times its size in memory at the peak when downloaded,
-  // and about 2.4 times when saved to disk, so saving can handle files about 1.5 times as large.
+  // held in memory until it's saved, so warn when it's large for this device's memory. Keeping the
+  // video of a 600 MB MP4 in Chromium took about 3.8 times the output's size in memory at the
+  // peak when downloaded, and about 3 times when saved to disk, so the limit is a little higher
+  // when saving.
   const largeForDevice = !manualMode && !isVideo && file !== undefined && keepsVideo
-    && deviceMemoryGB !== undefined && file.size > deviceMemoryGB * 1024 ** 3 / (savesToDisk ? 2.5 : 4);
+    && deviceMemoryGB !== undefined && file.size > deviceMemoryGB * 1024 ** 3 / (savesToDisk ? 3 : 4);
   // The audio track that will be converted: the user's choice, else all tracks for MKA and the
   // first track for every other format. "All" falls back to the first track if the user then
   // switches to a format that holds only one.
