@@ -35,7 +35,6 @@ Convert audio and video files right in your browser using FFmpeg and WebAssembly
   - [Limits](#limits)
 - [Production](#production)
 - [Tests](#tests)
-- [Benchmarking encoders](#benchmarking-encoders)
 - [Code layout](#code-layout)
 - [License](#license)
 
@@ -60,7 +59,7 @@ Choose **Video** instead of Audio to re-encode the video with any of the video e
 - **Size and frame rate:** every encoder can change the frame rate, width and height (all "Original" by default; with only the width or the height set, the other keeps the aspect ratio). Encoders that only allow certain frame sizes (such as DV, H.261 and H.263) resize the video to fit.
 - **Trimming:** to convert only part of the video, drag the start and end handles under the video preview. Browsers can't preview every format FFmpeg reads, but the handles still work then.
 
-AV1 can be encoded with libaom or SVT-AV1, and AV1 input is decoded with dav1d (the FFmpeg cores in `vendor/ffmpeg-core` include all three; see its README). libaom is the first choice, because it was faster in the [benchmark](#benchmarking-encoders) and also works without multi-threading. SVT-AV1 and H.265 need a browser that allows multi-threading (the page must be cross-origin isolated).
+AV1 can be encoded with libaom or SVT-AV1, and AV1 input is decoded with dav1d (the FFmpeg cores in `vendor/ffmpeg-core` include all three; see its README). libaom is the first choice, because it was faster in our benchmarks in the browser (the numbers are in the [FFmpeg core README](vendor/ffmpeg-core/README.md)) and also works without multi-threading. SVT-AV1 and H.265 need a browser that allows multi-threading (the page must be cross-origin isolated).
 
 ### Manual command
 
@@ -170,20 +169,6 @@ yarn lint
 
 GitHub Actions runs both suites, the linter and the frontend build on every push to master and on pull requests.
 
-## Benchmarking encoders
-
-`scripts/benchmark-encoders.mjs` converts a video with several encoders through the converter itself (the production build, in Chromium, with the same FFmpeg WebAssembly cores as visitors get) and reports each one's time, file size and quality (PSNR against the input):
-
-```sh
-yarn build
-npx playwright install chromium   # once
-yarn benchmark path/to/video.mp4
-```
-
-It compares both AV1 encoders (libaom and SVT-AV1) at several speeds with VP9, H.264 and H.265, using the converter's settings for each. `--single-threaded` uses the single-threaded core, as in browsers that don't allow multi-threading; `--only AV1` runs just the encoders whose name contains "AV1"; `--keep <dir>` saves the outputs. The quality column needs `ffmpeg` on your PATH. A few seconds of real footage at the resolution you care about gives the most useful numbers.
-
-In this benchmark libaom was faster than SVT-AV1 in the browser, which is why it's the first choice for AV1 in the converter.
-
 ## Code layout
 
 | Path | What it does |
@@ -193,7 +178,6 @@ In this benchmark libaom was faster than SVT-AV1 in the browser, which is why it
 | `src/components/` | Small shared form controls (select, slider, yes/no radio, file input), the status panel, and the video trimmer. |
 | `src/utils/createFFmpegArgs.ts` | Builds the full FFmpeg command: which streams to include (`-map`), the format's arguments, and the shared options (keep the video, downmix to stereo). |
 | `src/utils/convertFile.ts` | Runs FFmpeg (WebAssembly) in the browser and downloads the result. |
-| `scripts/benchmark-encoders.mjs` | Compares video encoders' speed, file size and quality in the converter (`yarn benchmark`). |
 | `src/pages/Homepage.tsx` | The converter page. |
 | `src/utils/manualCommand.ts` | Checks and builds the arguments for a manual FFmpeg command. |
 | `src/pages/DownloadPage.tsx` | The video downloader page, which streams progress from the backend. |
