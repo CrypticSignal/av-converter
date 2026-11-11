@@ -67,7 +67,28 @@ Tick **Write my own FFmpeg command** to type everything after `ffmpeg -i <input>
 
 ### File size and memory
 
-There's no limit on the input file's size: FFmpeg reads it directly from disk. The converted file, though, is held in the browser's memory until it's saved (about twice over at the peak), so a very large output, such as a long video with "Keep the video", can make the browser run out of memory. The page warns about this beforehand (in browsers that report the device's memory), and explains it if the tab crashes during a conversion.
+There's no limit on the input file's size: FFmpeg reads it directly from disk.
+
+The converted file is written to disk too. FFmpeg writes it to the browser's private storage for the site (the [origin private file system](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system), a folder only this site can read, which needs no permission), and the browser downloads it from there. It's never held in memory, so its size is limited by disk space rather than by memory. The disk needs room for the file twice over while it downloads, for the copy in the private storage and the downloaded one, and the browser has to allow the site that much storage ([roughly](https://developer.mozilla.org/en-US/docs/Web/API/Storage_API/Storage_quotas_and_eviction_criteria) 60% of the disk's size in Chrome, Edge and Safari, and 10% of it up to 10 GiB in Firefox; less in private windows).
+
+The copy in the private storage is deleted one second after the download starts, which the download survives: the browser has opened the file by then, and carries on reading it. In Chromium on Linux the wait needed was a few milliseconds (of 20 downloads each, all failed with no wait, 1 failed after 2 ms, and none failed from 5 ms up, even with every CPU core busy, or for 2 GiB files). Other browsers and operating systems haven't been tested. A browser set to ask where to save each download isn't supported: the download may fail if the copy is deleted while it waits for an answer. If the tab is closed within that second, or during a conversion, the copy is deleted the next time the site is opened.
+
+Where the browser can't keep the file on disk (some private windows, older browsers), FFmpeg holds it in memory instead, as it does if the site's storage fills up part-way through a conversion, which is then tried again in memory. A very large output, such as a long video with "Keep the video", can then make the browser run out of memory. The page warns about this beforehand when the file is large for the device's memory (in browsers that report it) and the browser reports less storage than the file needs, and explains it if the tab crashes during a conversion.
+
+Peak increase in Chromium's memory use during a conversion, in headless Chromium on a machine with 15 GiB of memory (`scripts/measure-memory.ts`; the first three rows are the median of three runs, the rest one run each):
+
+| Conversion | Output | On disk | In memory |
+| --- | --- | --- | --- |
+| WAV to WAV | 300 MiB | 0.15 GiB | 0.98 GiB |
+| WAV to WAV | 600 MiB | 0.16 GiB | 2.08 GiB |
+| MP4 to AAC, keeping the video | 600 MiB | 0.36 GiB | 2.38 GiB |
+| MP4 to AAC, keeping the video | 1 GiB | 0.55 GiB | 4.96 GiB |
+| MP4 to AAC, keeping the video | 1.5 GiB | 1.02 GiB | 5.85 GiB |
+| MP4 to AAC, keeping the video | 2 GiB | 1.22 GiB | ran out of memory |
+| MP4 to AAC, keeping the video | 4 GiB | 1.29 GiB | ran out of memory |
+| MP4 to AAC, keeping the video | 6 GiB | 1.22 GiB | ran out of memory |
+
+On disk, memory use stops growing with the file's size at about 1.3 GiB. 6 GiB was the largest output tried, not a limit.
 
 ## Run locally
 
@@ -167,7 +188,7 @@ Lint the frontend with ESLint, including React's hooks rules, and type-check the
 yarn lint
 ```
 
-Two scripts in `scripts/` test the converter in a real browser (Chromium, through Playwright), against the production build. CI doesn't run them:
+Three scripts in `scripts/` test or measure the converter in a real browser (Chromium, through Playwright), against the production build. CI doesn't run them:
 
 ```sh
 yarn build
@@ -179,9 +200,13 @@ node scripts/test-keep-video.ts
 
 # Checks which video encoders hang on the multi-threaded core without -threads 4.
 node scripts/test-threads.ts path/to/video.mp4
+
+# Measures the browser's memory use while converting large files (see "File size and memory").
+# Needs ffmpeg on your PATH, and Linux.
+node scripts/measure-memory.ts
 ```
 
-Both print one line per case and a summary. `test-keep-video` exits with 1 if any case fails; `--containers mp4,avi` and `--formats AAC,MP3` limit what it tests. `test-threads` also takes `--only libx264,gif`, `--rounds` and `--timeout`. Each script's header comment lists all its options.
+All three print one line per case and a summary. `test-keep-video` exits with 1 if any case fails; `--containers mp4,avi` and `--formats AAC,MP3` limit what it tests. `test-threads` also takes `--only libx264,gif`, `--rounds` and `--timeout`. `measure-memory` takes `--sizes 300,600` (in MiB), `--conversions wav,keep-video`, `--output disk,memory` and `--runs`. Each script's header comment lists all its options.
 
 GitHub Actions runs both suites, the linter (which also type-checks the scripts) and the frontend build on every push to master and on pull requests.
 
@@ -194,11 +219,15 @@ GitHub Actions runs both suites, the linter (which also type-checks the scripts)
 | `src/components/` | Small shared form controls (select, slider, yes/no radio, file input), the status panel, and the video trimmer. |
 | `src/utils/createFFmpegArgs.ts` | Builds the full FFmpeg command: which streams to include (`-map`), the format's arguments, and the shared options (keep the video, downmix to stereo). |
 | `src/utils/convertFile.ts` | Runs FFmpeg (WebAssembly) in the browser and downloads the result. |
+| `src/utils/ffmpegWorker.ts` | The worker that runs the FFmpeg core: a copy of ffmpeg.wasm's own, which can also mount a folder whose file is kept on disk. |
+| `src/utils/diskFileSystem.ts` | The file system behind that folder: it passes FFmpeg's reads and writes to a file in the browser's private storage, so the converted file isn't held in memory. |
+| `src/utils/outputStorage.ts` | The page's side of the private storage: where converted files go, reading one back to download it, and deleting them. |
 | `src/pages/Homepage.tsx` | The converter page. |
 | `src/utils/manualCommand.ts` | Checks and builds the arguments for a manual FFmpeg command. |
 | `src/pages/DownloadPage.tsx` | The video downloader page, which streams progress from the backend. |
 | `scripts/test-keep-video.ts` | Tests "Keep the video" for every container and audio format that offers it, in Chromium (see Tests). |
 | `scripts/test-threads.ts` | Checks which video encoders need `-threads 4` on the multi-threaded FFmpeg core, in Chromium (see Tests). |
+| `scripts/measure-memory.ts` | Measures the browser's memory use while converting large files, with the converted file on disk and in memory, in Chromium (see Tests). |
 | `downloader/server.py` | The yt-dlp backend. |
 | `set_password.py` | Sets the downloader's password, saving its hash in `downloader-password.env`. |
 | `docker/prod/nginx.conf`, `nginx-http.conf` | Nginx for HTTPS, and HTTP only (local mode and first certificate). Both include `locations.conf`, the site's routes, which adds the security headers in `security-headers.conf` and `app-headers.conf`. |

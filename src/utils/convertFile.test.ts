@@ -1,10 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FFmpeg } from '@ffmpeg/ffmpeg';
+import { downloadFile } from './downloadFile';
+import { discardOutput, prepareOutputFolder, storedOutput } from './outputStorage';
 
 // Fetching a core returns its own URL, so a test can tell which core was loaded.
 const toBlobURL = vi.fn(async (url: string) => url);
 vi.mock('@ffmpeg/util', () => ({ toBlobURL: (url: string) => toBlobURL(url) }));
 vi.mock('./downloadFile', () => ({ downloadFile: vi.fn() }));
+// The browser's private storage, where converted files are kept on disk. Unavailable unless a
+// test says otherwise (see keepOnDisk), so the converted file is held in memory.
+vi.mock('./outputStorage', () => ({
+  prepareOutputFolder: vi.fn(async () => undefined),
+  storedOutput: vi.fn(),
+  discardOutput: vi.fn(async () => {}),
+}));
 
 type Core = 'mt' | 'st';
 const coreOf = (coreURL: string): Core => (/\/mt\//.test(coreURL) ? 'mt' : 'st');
@@ -47,11 +56,37 @@ class FakeFFmpeg {
   };
   deleteFile = async () => true;
   createDir = async () => true;
-  mount = async () => true;
-  unmount = async () => true;
-  exec = async () => (this.behaviour.exec ? this.behaviour.exec(this.core!) : 0);
-  readFile = async () => new Uint8Array([1, 2, 3]);
+  /** Every mount, as [file system, options, folder]. */
+  mounts: [string, unknown, string][] = [];
+  /** Every folder unmounted. */
+  unmounts: string[] = [];
+  /** The arguments of every exec. */
+  execs: string[][] = [];
+  /** Whether the worker can keep a file on disk (mounting our own file system, 'OPFS'). */
+  canMountDisk = true;
+  mount = async (type: string, options: unknown, mountPoint: string) => {
+    this.mounts.push([type, options, mountPoint]);
+    return type !== 'OPFS' || this.canMountDisk;
+  };
+  unmount = async (mountPoint: string) => {
+    this.unmounts.push(mountPoint);
+    return true;
+  };
+  exec = async (args: string[]) => {
+    this.execs.push(args);
+    return this.behaviour.exec ? this.behaviour.exec(this.core!) : 0;
+  };
+  /** The converted file's bytes, when it's held in FFmpeg's memory. */
+  readFile = vi.fn(async () => new Uint8Array([1, 2, 3]));
 }
+
+/** The folder in the browser's private storage that a test's converted file is kept in. */
+const FOLDER = ['converted-files', 'tab', '1'];
+/** Make the browser's private storage available, holding the converted file. */
+const keepOnDisk = () => {
+  vi.mocked(prepareOutputFolder).mockResolvedValue(FOLDER);
+  vi.mocked(storedOutput).mockResolvedValue(new File(['converted'], 'out.mp3'));
+};
 const asFFmpeg = (fake: FakeFFmpeg) => fake as unknown as FFmpeg;
 
 /** A fresh copy of the module, as its record of failed threads lasts for the page's lifetime. */
@@ -63,6 +98,10 @@ const importFresh = async () => {
 beforeEach(() => {
   vi.stubGlobal('crossOriginIsolated', true);
   toBlobURL.mockClear();
+  vi.mocked(downloadFile).mockClear();
+  vi.mocked(discardOutput).mockClear();
+  vi.mocked(storedOutput).mockReset();
+  vi.mocked(prepareOutputFolder).mockReset().mockResolvedValue(undefined);
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
@@ -209,7 +248,7 @@ describe('convertFile', () => {
 
   it('does not retry running out of memory for files, which both cores hold the same way', async () => {
     const ffmpeg = new FakeFFmpeg();
-    ffmpeg.readFile = async () => { throw new Error('Array buffer allocation failed'); };
+    ffmpeg.readFile.mockRejectedValue(new Error('Array buffer allocation failed'));
     const { alerts } = await run(ffmpeg);
     expect(ffmpeg.loads).toEqual(['mt']);
     expect(alerts.at(-1)).toEqual(['error', expect.stringMatching(/ran out of memory/)]);
@@ -261,6 +300,101 @@ describe('convertFile', () => {
       const { statuses } = await conversion;
       expect(ffmpeg.terminations).toBe(0);
       expect(statuses.at(-1)).toBe('Conversion complete');
+    });
+  });
+
+  describe('keeping the converted file on disk', () => {
+    // The file on disk is deleted by a timer once its download has started.
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('has FFmpeg write the output to the browser\'s private storage, and downloads it from there', async () => {
+      keepOnDisk();
+      const { DELETE_DELAY_MS } = await importFresh();
+      const ffmpeg = new FakeFFmpeg();
+      const { alerts, statuses, onOutput } = await run(ffmpeg);
+      // Our worker mounts a folder holding the file on disk, and FFmpeg writes there.
+      expect(ffmpeg.mounts).toContainEqual(['OPFS', { folder: FOLDER, name: 'out.mp3' }, '/output']);
+      expect(ffmpeg.execs).toEqual([['-i', '/input/in.wav', '/output/out.mp3']]);
+      // The folder is unmounted, which closes the file, before the page reads it.
+      expect(ffmpeg.unmounts).toContain('/output');
+      expect(storedOutput).toHaveBeenCalledWith(FOLDER, 'out.mp3');
+      // It's never copied out of FFmpeg's worker.
+      expect(ffmpeg.readFile).not.toHaveBeenCalled();
+      expect(downloadFile).toHaveBeenCalledWith(expect.stringMatching(/^blob:/), 'out.mp3');
+      // The page isn't given the file to offer again, as it's about to be deleted.
+      expect(onOutput).not.toHaveBeenCalled();
+      expect(alerts.at(-1)?.[0]).toBe('success');
+      expect(statuses.at(-1)).toBe('Conversion complete');
+      // The file stays until the browser has had time to open it for the download.
+      await vi.advanceTimersByTimeAsync(DELETE_DELAY_MS - 1);
+      expect(discardOutput).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(discardOutput).toHaveBeenCalledWith(FOLDER);
+    });
+
+    it('holds the output in memory where the browser has no private storage', async () => {
+      const ffmpeg = new FakeFFmpeg();
+      const { onOutput } = await run(ffmpeg);
+      expect(ffmpeg.mounts.map(([type]) => type)).toEqual(['WORKERFS']);
+      expect(ffmpeg.execs).toEqual([['-i', '/input/in.wav', 'out.mp3']]);
+      expect(ffmpeg.readFile).toHaveBeenCalledOnce();
+      expect(onOutput).toHaveBeenCalledOnce();
+    });
+
+    it('holds the output in memory when the worker can\'t open the file on disk', async () => {
+      keepOnDisk();
+      const ffmpeg = new FakeFFmpeg();
+      ffmpeg.canMountDisk = false;
+      const { onOutput } = await run(ffmpeg);
+      expect(ffmpeg.execs).toEqual([['-i', '/input/in.wav', 'out.mp3']]);
+      expect(ffmpeg.readFile).toHaveBeenCalledOnce();
+      expect(onOutput).toHaveBeenCalledOnce();
+      // Whatever the worker made on disk is deleted.
+      expect(discardOutput).toHaveBeenCalledWith(FOLDER);
+    });
+
+    it('deletes the file on disk when the conversion fails', async () => {
+      keepOnDisk();
+      const ffmpeg = new FakeFFmpeg({ exec: async () => 1 });
+      const { alerts, onOutput } = await run(ffmpeg);
+      expect(ffmpeg.unmounts).toContain('/output');
+      expect(discardOutput).toHaveBeenCalledWith(FOLDER);
+      expect(onOutput).not.toHaveBeenCalled();
+      expect(alerts.at(-1)).toEqual(['error', expect.stringMatching(/exited with code 1/)]);
+    });
+
+    it('tries again in memory when the browser\'s storage fills up', async () => {
+      keepOnDisk();
+      // FFmpeg fails with this when a write to disk is refused for lack of space.
+      const ffmpeg: FakeFFmpeg = new FakeFFmpeg({
+        exec: async () => {
+          if (ffmpeg.execs.length > 1) return 0;
+          ffmpeg.log('Error writing trailer of /output/out.mp3: No space left on device');
+          return 1;
+        },
+      });
+      const { alerts, statuses, onOutput } = await run(ffmpeg);
+      expect(ffmpeg.execs).toEqual([['-i', '/input/in.wav', '/output/out.mp3'], ['-i', '/input/in.wav', 'out.mp3']]);
+      // The incomplete file on disk is deleted, and the second attempt's is read from memory.
+      expect(discardOutput).toHaveBeenCalledWith(FOLDER);
+      expect(ffmpeg.readFile).toHaveBeenCalledOnce();
+      expect(onOutput).toHaveBeenCalledOnce();
+      expect(alerts).toContainEqual(['warning', expect.stringMatching(/storage for this site filled up/)]);
+      expect(alerts.at(-1)?.[0]).toBe('success');
+      expect(statuses).not.toContain('Conversion failed');
+    });
+
+    it('keeps the output on disk after retrying single-threaded', async () => {
+      keepOnDisk();
+      const ffmpeg = new FakeFFmpeg({ exec: crashWith('mt') });
+      const { alerts } = await run(ffmpeg);
+      expect(ffmpeg.loads).toEqual(['mt', 'st']);
+      // The crashed attempt's file is deleted at once, and the retry's is downloaded from disk.
+      expect(discardOutput).toHaveBeenCalledOnce();
+      expect(ffmpeg.readFile).not.toHaveBeenCalled();
+      expect(downloadFile).toHaveBeenCalledOnce();
+      expect(alerts.at(-1)?.[0]).toBe('success');
     });
   });
 
