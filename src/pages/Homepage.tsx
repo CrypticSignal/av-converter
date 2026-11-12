@@ -18,6 +18,7 @@ import { manualCommandArgs, videoThreadArgs } from '../utils/manualCommand';
 import { formatBytes } from '../utils/progress';
 import { loadSettings, saveSettings } from '../utils/savedSettings';
 import { probeFile, type StreamInfo } from '../utils/probeFile';
+import { isVideoFile } from '../utils/isVideoFile';
 import { freeOutputSpace, removeAbandonedOutputs } from '../utils/outputStorage';
 import MediaInfoPanel, { type MediaInfoState } from '../components/MediaInfoPanel';
 import { FORMATS, type Codec, type FormatSettings, type SetSetting } from '../formats';
@@ -236,6 +237,8 @@ const Homepage = (): React.JSX.Element => {
     setFile(currentFile);
     if (!currentFile) return;
     setAlert(null);
+    // Default to converting the video for a video file, else to converting the audio.
+    update('outputType', isVideoFile(currentFile) ? 'video' : 'audio');
     // Suggest the input's name as the output name, e.g. "song.wav" -> "song".
     setOutputName(withoutExtension(currentFile.name));
     // Start downloading FFmpeg (about 12 MB compressed) while the user picks settings. If it fails,
