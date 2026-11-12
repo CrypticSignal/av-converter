@@ -8,22 +8,36 @@ import singleThreadWasmURL from '../../vendor/ffmpeg-core/st/ffmpeg-core.wasm?ur
 import multiThreadCoreURL from '../../vendor/ffmpeg-core/mt/ffmpeg-core.js?url';
 import multiThreadWasmURL from '../../vendor/ffmpeg-core/mt/ffmpeg-core.wasm?url';
 import multiThreadWorkerURL from '../../vendor/ffmpeg-core/mt/ffmpeg-core.worker.js?url';
+// Our own copy of ffmpeg.wasm's worker, which can also keep a file on disk (see ffmpegWorker.ts).
+import ffmpegWorkerURL from './ffmpegWorker?worker&url';
 import type { AlertSeverity } from '../components/Alert';
 import { nonnegative, OperationProgress } from './progress';
 import { downloadFile } from './downloadFile';
+import { DISK_FS, type DiskMountOptions } from './diskFileSystem';
+import { discardOutput, prepareOutputFolder, storedOutput } from './outputStorage';
 
 const loads = new WeakMap<FFmpeg, Promise<void>>();
 /** Instances whose load has succeeded (their promise in `loads` has resolved). */
 const finishedLoads = new WeakSet<FFmpeg>();
 const INPUT_DIR = '/input';
+/**
+ * The folder FFmpeg writes the converted file to when it's kept on disk, in the browser's
+ * private storage, rather than in FFmpeg's memory (see diskFileSystem.ts and outputStorage.ts).
+ */
+const OUTPUT_DIR = '/output';
 // FFFSType.WORKERFS; the package's runtime exports are stubbed outside browsers.
 const WORKERFS = 'WORKERFS' as FFFSType;
 const ERROR_PATTERN = /error|invalid|unsupported|unknown|not found|no such|could not|unable|cannot|failed/i;
 // How browsers and FFmpeg's WebAssembly runtime report running out of memory.
 const OUT_OF_MEMORY = /out of memory|allocation failed|Cannot enlarge memory|Aborted\(OOM\)|Invalid typed array length|Array buffer allocation/i;
-/** What to try after running out of memory. The converted file is held in memory until it's saved. */
-export const OUT_OF_MEMORY_ADVICE = 'The converted file has to fit in the browser\'s memory until it\'s saved. '
-  + 'Try converting a shorter part of the file (e.g. in manual mode, -t 600 converts the first 10 minutes), or closing other tabs.';
+// How FFmpeg reports that a write failed for lack of space: the site's storage allowance ran out
+// while the converted file was being written to disk (see diskFileSystem.ts).
+const STORAGE_FULL = /No space left on device/i;
+/**
+ * What to try after running out of memory. The converted file is only held in memory where the
+ * browser can't keep it on disk (see outputStorage.ts), but FFmpeg itself can also run out.
+ */
+export const OUT_OF_MEMORY_ADVICE = 'Try converting a shorter part of the file (e.g. in manual mode, -t 600 converts the first 10 minutes), or closing other tabs.';
 
 /**
  * Wait for an answer from FFmpeg's worker, but give up after a while. When the worker runs
@@ -98,7 +112,7 @@ const loadCore = async (ffmpeg: FFmpeg, threads: boolean, isActive: () => boolea
     const [coreURL, wasmURL, workerURL] = urls;
     // The single-threaded core has no worker file.
     try {
-      await ffmpeg.load({ coreURL, wasmURL, ...(workerURL && { workerURL }) });
+      await ffmpeg.load({ classWorkerURL: ffmpegWorkerURL, coreURL, wasmURL, ...(workerURL && { workerURL }) });
     } catch (error) {
       throw new CoreStartError(error);
     }
@@ -165,7 +179,9 @@ export interface ConversionJob {
   onLog: (message: string) => void;
   /**
    * Receives the converted file's object URL after its download starts, so the page can
-   * offer it again. The receiver then owns the URL and must revoke it.
+   * offer it again. The receiver then owns the URL and must revoke it. Only called when the
+   * converted file is held in memory: one kept on disk is deleted once its download has
+   * started (see DELETE_DELAY_MS), so it can't be offered again.
    */
   onOutput: (output: ConvertedFile) => void;
 }
@@ -185,20 +201,67 @@ export interface ConvertedFile {
  */
 export const STALL_TIMEOUT_MS = 120_000;
 
-/** Why a conversion is tried again on the single-threaded core. */
-type RetryReason = 'crashed' | 'stalled';
+/**
+ * How long after a converted file's download starts its copy on disk, in the browser's private
+ * storage, is deleted. The download carries on reading the deleted file to the end.
+ *
+ * The browser never says when a download has started or finished, so this is a fixed wait. It
+ * mustn't be too short: deleting the file before the browser has opened it cancels the
+ * download. In Chromium on Linux that took a few milliseconds: of 20 downloads each, all failed
+ * with no wait, 1 failed after 2 ms, and none failed from 5 ms up, even with every CPU core
+ * busy, or for 2 GiB files deleted part-way through. A second leaves a wide margin, and is
+ * short enough that the file is almost never left behind by a tab that's closed.
+ *
+ * This also relies on every download following a click on Convert. Chrome holds a tab's second
+ * and later automatic downloads (ones the page starts with no recent click) behind a "Download
+ * multiple files" prompt, and the file would be deleted before the user answered it. That
+ * doesn't happen here: a conversion outlasts the 5 seconds for which Chrome counts a click as
+ * the cause of what the page does, yet in a test of four conversions in a row in one tab, none
+ * was held, so the click on Convert appears to reset Chrome's count. Anything that starts a
+ * conversion without a click, such as converting several files in a row, would need this
+ * reworked.
+ */
+export const DELETE_DELAY_MS = 1000;
+
+/**
+ * Why a conversion is tried again:
+ * - 'crashed' or 'stalled': the multi-threaded core crashed (most likely by running out of
+ *   memory) or stopped responding, so it's tried on the single-threaded core. Its memory can
+ *   grow further, and it has no threads to hang. It's slower, but can finish where threads can't
+ *   (e.g. with very large video frames, or filters that buffer a lot).
+ * - 'storage-full': the site's storage allowance ran out while the converted file was being
+ *   written to disk, so it's tried with the file held in memory instead. Private windows allow
+ *   very little storage, for example, and the file may well still fit in memory.
+ */
+type RetryReason = 'crashed' | 'stalled' | 'storage-full';
 
 export const convertFile = async (ffmpeg: FFmpeg, job: ConversionJob) => {
-  // If the multi-threaded core crashes (most likely by running out of memory) or stops
-  // responding, try once more with the single-threaded one. Its memory can grow further, and
-  // it has no threads to hang. It's slower, but can finish where threads can't (e.g. with very
-  // large video frames, or filters that buffer a lot).
-  const retry = await convertOnce(ffmpeg, job);
-  if (retry) await convertOnce(ffmpeg, job, retry);
+  // Whether to keep the converted file on disk, where the browser can. Off once that has failed.
+  let onDisk = true;
+  // Each reason is acted on once at most. convertOnce doesn't give the same one twice (after
+  // 'crashed' or 'stalled' it no longer uses threads, and after 'storage-full' it no longer
+  // writes to disk), so this only makes sure the loop can't go on forever.
+  const retried = new Set<RetryReason>();
+  let reason: RetryReason | undefined;
+  for (;;) {
+    reason = await convertOnce(ffmpeg, job, onDisk, reason) ?? undefined;
+    if (!reason || retried.has(reason)) return;
+    retried.add(reason);
+    if (reason === 'storage-full') onDisk = false;
+  }
 };
 
-const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, retryReason?: RetryReason): Promise<RetryReason | void> => {
-  const isRetry = retryReason !== undefined;
+/**
+ * Runs the conversion once. Returns why it should be run again, if it should (the caller,
+ * convertFile, decides whether it is). Otherwise the outcome has been reported through the job's
+ * callbacks.
+ *
+ * onDisk      Keep the converted file on disk if the browser can, rather than in memory.
+ * retryReason Why this is another attempt, if it is.
+ */
+const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, onDisk: boolean, retryReason?: RetryReason): Promise<RetryReason | void> => {
+  // Whether this attempt moves to the single-threaded core because threads failed.
+  const withoutThreads = retryReason === 'crashed' || retryReason === 'stalled';
   const { file, ffmpegArgs, outputFilename, knownTimeline, outputDuration, isActive, onAlert, onStatus, onLog, onOutput } = job;
   const inputFilename = file.name;
   let retry: RetryReason | undefined;
@@ -213,6 +276,8 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, retryReason?: Ret
   let execCrashed = false;
   /** Whether the watchdog stopped the core because FFmpeg stopped responding. */
   let stalled = false;
+  /** Whether FFmpeg said it ran out of space while writing (see STORAGE_FULL). */
+  let storageFull = false;
   /** When FFmpeg last logged or reported progress (Date.now()). */
   let lastActivity = Date.now();
   let duration: number | undefined = knownTimeline ? outputDuration : undefined;
@@ -225,6 +290,7 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, retryReason?: Ret
     lastActivity = Date.now();
     if (!isActive()) return;
     onLog(message);
+    if (STORAGE_FULL.test(message)) storageFull = true;
     if (firstError === undefined && message !== 'Conversion failed!' && ERROR_PATTERN.test(message)) {
       firstError = message.trim().slice(0, 300);
     }
@@ -249,6 +315,13 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, retryReason?: Ret
   let filesTouched = false;
   let inputMounted = false;
   const inputPath = `${INPUT_DIR}/${inputFilename}`;
+  /**
+   * The folder in the browser's private storage that holds this attempt's converted file, if
+   * it's kept on disk (see outputStorage.ts). Undefined when it's held in memory.
+   */
+  let outputFolder: string[] | undefined;
+  /** Whether OUTPUT_DIR is mounted, which keeps the file on disk open in FFmpeg's worker. */
+  let outputMounted = false;
   try {
     checkActive();
     report({ stage: 'Loading FFmpeg' });
@@ -258,12 +331,15 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, retryReason?: Ret
       onLog(`The multi-threaded core stopped responding for ${STALL_TIMEOUT_MS / 1000} seconds. `
         + 'Retrying with the single-threaded core.');
       await switchToSingleThread(ffmpeg, isActive);
-    } else if (isRetry) {
+    } else if (retryReason === 'crashed') {
       onAlert('warning', 'Multi-threaded FFmpeg crashed, most likely by running out of memory, so trying again '
         + 'without multi-threading. This is slower, but can use more memory.');
       onLog('The multi-threaded core crashed. Retrying with the single-threaded core.');
       await switchToSingleThread(ffmpeg, isActive);
     } else {
+      if (retryReason === 'storage-full') {
+        onLog('The browser\'s storage for this site filled up. Retrying with the converted file held in memory.');
+      }
       onAlert('info', canUseThreads() ? 'Loading FFmpeg...'
         : 'Loading FFmpeg. This browser does not allow multi-threading here, so conversion will be slower.');
       const expectedThreads = canUseThreads();
@@ -282,10 +358,34 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, retryReason?: Ret
     inputMounted = await ffmpeg.mount(WORKERFS, { blobs: [{ name: inputFilename, data: file }] }, INPUT_DIR);
     if (!inputMounted) throw new Error('Could not read the file.');
     checkActive();
-    const args = ffmpegArgs.map((arg, i) => ffmpegArgs[i - 1] === '-i' && arg === inputFilename ? inputPath : arg);
+    // Have FFmpeg write the output to disk, in the browser's private storage, where it can. The
+    // output then never has to fit in memory, however large it is. Our worker opens the file
+    // and mounts a folder holding it (see ffmpegWorker.ts). Where the browser can't (some
+    // private windows, older browsers), FFmpeg writes it to its own memory, as it always did.
+    if (onDisk) outputFolder = await prepareOutputFolder();
+    checkActive();
+    if (outputFolder) {
+      await ffmpeg.createDir(OUTPUT_DIR).catch(() => {}); // Exists after an earlier conversion.
+      const options: DiskMountOptions = { folder: outputFolder, name: outputFilename };
+      // ffmpeg.wasm's types only know the core's own file systems and their options, but it
+      // passes both to the worker untouched.
+      outputMounted = await ffmpeg.mount(DISK_FS as FFFSType, options as object, OUTPUT_DIR).catch(() => false);
+      checkActive();
+      // The worker couldn't open the file: delete whatever it made, and use memory.
+      if (!outputMounted) {
+        void discardOutput(outputFolder);
+        outputFolder = undefined;
+      }
+    }
+    // Where FFmpeg writes the output: its last argument is always the output's filename.
+    const outputPath = outputFolder ? `${OUTPUT_DIR}/${outputFilename}` : outputFilename;
+    const args = ffmpegArgs.map((arg, i) =>
+      ffmpegArgs[i - 1] === '-i' && arg === inputFilename ? inputPath
+        : i === ffmpegArgs.length - 1 ? outputPath
+        : arg);
     started = performance.now();
     report({ stage: 'Converting' });
-    onAlert('info', isRetry ? 'Converting without multi-threading'
+    onAlert('info', withoutThreads ? 'Converting without multi-threading'
       : fellBack ? 'Converting. Multi-threaded FFmpeg failed to start in this browser, so this will be slower.'
       : 'Converting');
     let exitCode: number;
@@ -309,7 +409,36 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, retryReason?: Ret
     }
     checkActive();
     if (exitCode !== 0) throw new Error(`FFmpeg exited with code ${exitCode}`);
+    // Some of FFmpeg's writers carry on after a failed write and still exit with 0. A file that
+    // didn't fit on disk is incomplete either way.
+    if (storageFull && outputFolder) throw new Error('No space left on device');
     report({ stage: 'Preparing output' });
+    if (outputFolder) {
+      // The output is on disk. Unmounting its folder closes the file in the worker, which until
+      // then is the only thing allowed to touch it.
+      await withTimeout(ffmpeg, ffmpeg.unmount(OUTPUT_DIR));
+      outputMounted = false;
+      checkActive();
+      // A File that refers to the bytes on disk. The browser copies them to the downloads
+      // folder itself, so they never pass through the page's memory.
+      const stored = await storedOutput(outputFolder, outputFilename);
+      checkActive();
+      const objectURL = URL.createObjectURL(stored);
+      downloadFile(objectURL, outputFilename);
+      // Delete the copy on disk once the browser has had time to open it for the download (see
+      // DELETE_DELAY_MS). The timer now looks after the folder, so it's forgotten here, or the
+      // clean-up at the end of this function would delete it straight away.
+      const downloadingFolder = outputFolder;
+      outputFolder = undefined;
+      setTimeout(() => {
+        URL.revokeObjectURL(objectURL);
+        void discardOutput(downloadingFolder);
+      }, DELETE_DELAY_MS);
+      onAlert('success', 'Done! The converted file should have started downloading.');
+      report({ stage: 'Conversion complete' });
+      return retry;
+    }
+    // The output is in FFmpeg's memory, from where it's copied to the page and then into a Blob.
     // Copying a large output out of the worker is where memory most often runs out.
     const fileData = await withTimeout(ffmpeg, ffmpeg.readFile(outputFilename));
     checkActive();
@@ -332,10 +461,15 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, retryReason?: Ret
       // ffmpeg.wasm passes errors from its worker on as plain strings.
       const message = error instanceof Error ? error.message : typeof error === 'string' ? error : undefined;
       const detail = firstError ?? message;
-      if (execCrashed && !isRetry && usesThreads(ffmpeg)) {
+      if (execCrashed && !withoutThreads && usesThreads(ffmpeg)) {
         retry = stalled ? 'stalled' : 'crashed';
+      } else if (storageFull && outputFolder) {
+        // Only when the file was on disk, so the attempt in memory can't ask for another.
+        retry = 'storage-full';
+        onAlert('warning', 'The browser\'s storage for this site filled up, so trying again with the converted file '
+          + 'held in memory.');
       } else if (OUT_OF_MEMORY.test(`${message} ${firstError}`)) {
-        onAlert('error', `The browser ran out of memory for the converted file. ${OUT_OF_MEMORY_ADVICE}`);
+        onAlert('error', `The browser ran out of memory. ${OUT_OF_MEMORY_ADVICE}`);
       } else {
         onAlert('error', detail ? `An error occurred during conversion: ${detail}` : 'An error occurred during conversion.');
       }
@@ -347,6 +481,11 @@ const convertOnce = async (ffmpeg: FFmpeg, job: ConversionJob, retryReason?: Ret
     // Best effort: missing files and a terminated worker are expected here.
     if (filesTouched && isActive()) await ffmpeg.deleteFile(outputFilename).catch(() => {});
     if (inputMounted && isActive()) await ffmpeg.unmount(INPUT_DIR).catch(() => {});
+    // Close the file on disk, if it's still open in the worker.
+    if (outputMounted && isActive()) await ffmpeg.unmount(OUTPUT_DIR).catch(() => {});
+    // A failed or cancelled conversion's file is of no use: free the space now. This also runs
+    // after a cancel (isActive is false then), when the stopped worker has let go of the file.
+    if (outputFolder) void discardOutput(outputFolder);
   }
   return retry;
 };

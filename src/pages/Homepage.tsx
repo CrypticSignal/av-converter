@@ -18,6 +18,7 @@ import { manualCommandArgs, videoThreadArgs } from '../utils/manualCommand';
 import { formatBytes } from '../utils/progress';
 import { loadSettings, saveSettings } from '../utils/savedSettings';
 import { probeFile, type StreamInfo } from '../utils/probeFile';
+import { freeOutputSpace, removeAbandonedOutputs } from '../utils/outputStorage';
 import MediaInfoPanel, { type MediaInfoState } from '../components/MediaInfoPanel';
 import { FORMATS, type Codec, type FormatSettings, type SetSetting } from '../formats';
 import { VideoEncoderSettings, VideoFormatPicker, useVideoAudioDefault } from '../components/VideoSettings';
@@ -118,8 +119,10 @@ const Homepage = (): React.JSX.Element => {
 
   // The last converted file, kept so it can be downloaded again from the link on the page.
   const [output, setOutput] = useState<ConvertedFile | null>(null);
-  // The file is held in memory behind an object URL. Free it when it's replaced or the
-  // page closes. (The function an effect returns runs before the next effect, and on unmount.)
+  // Only set when the file was held in memory: one written to disk, in the browser's private
+  // storage, is deleted once its download has started (see DELETE_DELAY_MS in convertFile.ts).
+  // The file is held in memory behind an object URL. Free it when it's replaced or the page
+  // closes. (The function an effect returns runs before the next effect, and on unmount.)
   useEffect(() => () => {
     if (output) URL.revokeObjectURL(output.url);
   }, [output]);
@@ -152,6 +155,19 @@ const Homepage = (): React.JSX.Element => {
     return () => window.removeEventListener('pagehide', markConversionEnded);
   }, []);
 
+  // How much the browser says this site may still store on disk, in bytes, which is where
+  // converted files are kept (see outputStorage.ts). 0 if it can't keep them there, and until
+  // it's known, and Infinity if the browser only says it's plenty (Chrome never reports more than
+  // 10 GiB, however much it really allows; see freeOutputSpace). It's only used for the warning
+  // below (see largeForDevice).
+  const [outputSpace, setOutputSpace] = useState(0);
+  // When the page opens: find that out, and delete the converted files left on disk by tabs
+  // that have since closed (nothing can be relied on to run when a tab closes).
+  useEffect(() => {
+    void removeAbandonedOutputs();
+    void freeOutputSpace().then(setOutputSpace);
+  }, []);
+
   // Remember the format and settings for next time, whenever they change.
   useEffect(() => saveSettings({ codec, settings }), [codec, settings]);
 
@@ -176,10 +192,15 @@ const Homepage = (): React.JSX.Element => {
   const effectiveSettings = hasVideoStream || !settings.isKeepVideo ? settings : { ...settings, isKeepVideo: false };
   // Whether the output can hold every audio track (MKA, or when keeping the video).
   const allowsAll = allowsAllAudioTracks(codec, effectiveSettings, file?.name);
-  // Keeping the video makes the output about as large as the input, and the converted file is
-  // held in memory until it's saved (about twice over at the peak), so warn when it's large
-  // for this device's memory.
+  // Keeping the video makes the output about as large as the input. The converted file is
+  // written to disk, in the browser's private storage, so its size doesn't matter to memory.
+  // But where the browser can't keep it there, or says it hasn't the space for it (as in a
+  // private window), it's held in memory until it's downloaded, so warn when it's large for
+  // this device's memory. (A browser that only says it has plenty of space, however large the
+  // file, never gets the warning: outputSpace is then Infinity.) Keeping the video of a 600 MB MP4 in Chromium took about 3.8 times
+  // the output's size in memory at the peak (see "File size and memory" in the README).
   const largeForDevice = !manualMode && !isVideo && file !== undefined && keepsVideo
+    && file.size > outputSpace
     && deviceMemoryGB !== undefined && file.size > deviceMemoryGB * 1024 ** 3 / 4;
   // The audio track that will be converted: the user's choice, else all tracks for MKA and the
   // first track for every other format. "All" falls back to the first track if the user then
@@ -496,7 +517,8 @@ const Homepage = (): React.JSX.Element => {
 
         {alert && <Alert severity={alert.severity} className="mt-4">{alert.message}</Alert>}
 
-        {/* A link to download the converted file again, in case the automatic download was blocked. */}
+        {/* A link to download the converted file again, in case the automatic download was blocked.
+            Only for a file held in memory: one written to disk has been deleted by now. */}
         {output && !isConverting && (
           <p className="mt-4 text-sm text-slate-400">
             If the download didn't start,{' '}
