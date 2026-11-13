@@ -195,6 +195,8 @@ const findBrowserPid = (profile: string) => {
 
 /** Choose the settings for `conversion` in the converter's page. */
 const chooseSettings = async (page: Page, conversion: string) => {
+  // A video input starts on the Video output type, which has no "Desired format" list.
+  await page.locator('input[name=output_type][value=audio]').check({ force: true });
   if (conversion === 'wav') {
     await page.selectOption('#codecs', 'WAV');
   } else {

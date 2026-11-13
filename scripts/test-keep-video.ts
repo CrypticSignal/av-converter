@@ -173,7 +173,9 @@ const convertInPage = async (page: Page, input: string, format: string): Promise
   await page.setInputFiles('input[type=file]', input);
   await page.waitForSelector('text=Duration', { timeout: PAGE_READY_TIMEOUT_MS });
 
-  // Choose the audio format and "Keep the video".
+  // Choose the audio format and "Keep the video". The sample is a video, so the page starts on the
+  // Video output type, which has no "Desired format" list: switch to Audio first.
+  await page.locator('input[name=output_type][value=audio]').check({ force: true });
   await page.selectOption('#codecs', format);
   await page.locator('input[name=keep_video]').nth(0).check({ force: true });
 
