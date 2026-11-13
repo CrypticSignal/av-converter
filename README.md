@@ -69,26 +69,28 @@ Tick **Write my own FFmpeg command** to type everything after `ffmpeg -i <input>
 
 There's no limit on the input file's size: FFmpeg reads it directly from disk.
 
-The converted file is written to disk too. FFmpeg writes it to the browser's private storage for the site (the [origin private file system](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system), a folder only this site can read, which needs no permission), and the browser downloads it from there. It's never held in memory, so its size is limited by disk space rather than by memory. The disk needs room for the file twice over while it downloads, for the copy in the private storage and the downloaded one, and the browser has to allow the site that much storage ([roughly](https://developer.mozilla.org/en-US/docs/Web/API/Storage_API/Storage_quotas_and_eviction_criteria) 60% of the disk's size in Chrome, Edge and Safari, and 10% of it up to 10 GiB in Firefox; less in private windows).
+The converted file is written to disk too. FFmpeg writes it to the browser's private storage for the site (the [origin private file system](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system), a folder only this site can read, which needs no permission), and the browser downloads it from there. Normally it's never held in memory (see the fallback below), so its size is limited by disk space rather than by memory. The disk needs room for the file twice over while it downloads, for the copy in the private storage and the downloaded one, and the browser has to allow the site that much storage ([roughly](https://developer.mozilla.org/en-US/docs/Web/API/Storage_API/Storage_quotas_and_eviction_criteria) 60% of the disk's size in Chrome, Edge and Safari, and 10% of it up to 10 GiB in Firefox; less in private windows).
 
-The copy in the private storage is deleted one second after the download starts, which the download survives: the browser has opened the file by then, and carries on reading it. In Chromium on Linux the wait needed was a few milliseconds (of 20 downloads each, all failed with no wait, 1 failed after 2 ms, and none failed from 5 ms up, even with every CPU core busy, or for 2 GiB files). Other browsers and operating systems haven't been tested. A browser set to ask where to save each download isn't supported: the download may fail if the copy is deleted while it waits for an answer. If the tab is closed within that second, or during a conversion, the copy is deleted the next time the site is opened.
+The copy in the private storage is deleted one second after the page starts the download (the page can't tell when the browser actually starts it). In Chromium on Linux the download survives this: the browser has opened the file by then and carries on reading it, and the wait needed was only a few milliseconds (of 20 downloads each, all failed with no wait, 1 failed after 2 ms, and none failed from 5 ms up, even with every CPU core busy, or for 2 GiB files). Other browsers and operating systems haven't been tested. A browser set to ask where to save each download isn't supported: the download may fail if the copy is deleted while it waits for an answer. If the tab is closed within that second, or during a conversion, the copy is deleted the next time the site is opened. Because the copy is gone, the page can't offer a link to download it again: if the browser blocks the automatic download, the conversion has to be run again. (A file held in memory, as below, does get the link.)
 
-Where the browser can't keep the file on disk (some private windows, older browsers), FFmpeg holds it in memory instead, as it does if the site's storage fills up part-way through a conversion, which is then tried again in memory. A very large output, such as a long video with "Keep the video", can then make the browser run out of memory. The page warns about this beforehand when the file is large for the device's memory (in browsers that report it) and the browser reports less storage than the file needs, and explains it if the tab crashes during a conversion.
+Where the browser can't keep the file on disk (some private windows, older browsers), FFmpeg holds it in memory instead, as it does if the site's storage fills up part-way through a conversion, which is then tried again in memory. A very large output, such as a long video with "Keep the video", can then make the browser run out of memory. The page warns about this beforehand when the file is large for the device's memory (in browsers that report it) and the browser reports less storage than the file needs (Chrome never reports more than 10 GiB of remaining storage, however much it allows, and Firefox limits a site to 10 GiB, so a reading of 10 GiB is taken to mean "plenty" and doesn't trigger the warning).
 
-Peak increase in Chromium's memory use during a conversion, in headless Chromium on a machine with 15 GiB of memory (`scripts/measure-memory.ts`; the first three rows are the median of three runs, the rest one run each):
+If the browser kills the tab for lack of memory during a conversion, the page says so the next time it loads.
 
-| Conversion | Output | On disk | In memory |
+Peak increase in Chromium's memory use during a conversion, in headless Chromium on a machine with 15 GiB of memory (`scripts/measure-memory.ts`; the first three rows are the median of three runs, the 1 and 1.5 GiB rows are one run each, and the 2, 4 and 6 GiB rows are the latest of two or three runs). "On disk" is how the converter normally works. "In memory" is the fallback described above, measured with the private storage switched off, so it only applies to a browser that can't keep the file on disk:
+
+| Conversion | Output | On disk (the default) | In memory (the fallback) |
 | --- | --- | --- | --- |
 | WAV to WAV | 300 MiB | 0.15 GiB | 0.98 GiB |
 | WAV to WAV | 600 MiB | 0.16 GiB | 2.08 GiB |
 | MP4 to AAC, keeping the video | 600 MiB | 0.36 GiB | 2.38 GiB |
 | MP4 to AAC, keeping the video | 1 GiB | 0.55 GiB | 4.96 GiB |
 | MP4 to AAC, keeping the video | 1.5 GiB | 1.02 GiB | 5.85 GiB |
-| MP4 to AAC, keeping the video | 2 GiB | 1.22 GiB | ran out of memory |
-| MP4 to AAC, keeping the video | 4 GiB | 1.29 GiB | ran out of memory |
-| MP4 to AAC, keeping the video | 6 GiB | 1.22 GiB | ran out of memory |
+| MP4 to AAC, keeping the video | 2 GiB | 1.12 GiB | ran out of memory |
+| MP4 to AAC, keeping the video | 4 GiB | 1.16 GiB | ran out of memory |
+| MP4 to AAC, keeping the video | 6 GiB | 1.13 GiB | ran out of memory |
 
-On disk, memory use stops growing with the file's size at about 1.3 GiB. 6 GiB was the largest output tried, not a limit.
+The "ran out of memory" results are therefore only a limit for a browser that has to use the fallback. On disk, memory use stops growing with the file's size at about 1.1 to 1.2 GiB. 6 GiB was the largest output tried, not a limit.
 
 ## Run locally
 
